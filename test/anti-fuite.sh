@@ -41,7 +41,8 @@ $trouve"
 
 # Courriels, sauf la forme noreply de GitHub (la seule admise dans ce dépôt).
 trouve=$(suivis | xargs grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' 2>/dev/null \
-  | grep -vE '@users\.noreply\.github\.com|@example\.(com|org)')
+  | grep -vE '@users\.noreply\.github\.com|@example\.(com|org)' \
+  | grep -vE 'git@(github|gitlab|bitbucket)\.(com|org)')
 [ -n "$trouve" ] && signaler "adresse de courriel :
 $trouve"
 
@@ -55,7 +56,8 @@ $trouve"
 # Noms d'hôte d'un réseau local ou d'une machine désignée. « example.* » et « exemple.* » sont
 # réservés à la documentation (RFC 2606) : ce sont justement les noms à employer dans un exemple.
 trouve=$(suivis | xargs grep -nE '\b[a-z0-9-]+\.(local|lan|home|internal|invalid)\b' 2>/dev/null \
-  | grep -vE '\b(example|exemple|test|hote|host|machine)\.(local|lan|home|internal|invalid)\b')
+  | grep -vE '\b(example|exemple|test|hote|host|machine)\.(local|lan|home|internal|invalid)\b' \
+  | grep -vE '\b(g?vimrc|bashrc|zshrc|rc|conf|config|theme|settings|env)\.local\b')
 [ -n "$trouve" ] && signaler "nom d'hôte local :
 $trouve"
 
@@ -79,7 +81,11 @@ if [ -r "$LISTE" ]; then
     t=$(suivis | xargs grep -niF -- "$mot" 2>/dev/null)
     for ex in $exceptions; do
       [ -n "$t" ] || break
-      t=$(printf '%s\n' "$t" | grep -vF -- "$ex:")
+      avant=$t
+      # préfixe de chemin : « lib/hints.sh » comme « spell/ » (un dossier entier). Les lignes de grep
+      # sont « chemin:ligne:texte », d'où l'ancrage en début de ligne et non sur « chemin: ».
+      t=$(printf '%s\n' "$t" | grep -v "^$(printf '%s' "$ex" | sed 's/[][\.*^$/]/\\&/g')")
+      [ "$avant" = "$t" ] && echo "  · exception « $ex » (mot « $mot ») : ne retire rien — chemin faux ?"
     done
     if [ -n "$t" ]; then signaler "mot interdit « $mot » :
 $t"; fi
