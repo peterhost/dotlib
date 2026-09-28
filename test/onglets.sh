@@ -147,6 +147,19 @@ import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
 import onglets; print(onglets.Onglet("T", lambda: [], genre="raccourcis").focus)' 2>&1)
 [ "$out" = "gauche" ] && ok "au démarrage, c'est la liste des sections qui a le focus" || ko "focus initial" "$out"
 
+# 9 quater. Les trois manques signalés par la session bash en écrivant « brc interface ».
+out=$(cd "$TMP" && $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets
+# a) le volet droit des groupes plie comme les autres
+print("plie" if len(onglets.plier("x" * 200, 40)) > 1 else "coupe")
+# b) un onglet de RÉGLAGE peut taire le décompte (« catppuccin 6 » n informe de rien)
+print(onglets.Onglet("T", lambda: [], genre="groupes", comptes=False).comptes)
+print(onglets.Onglet("T", lambda: [], genre="groupes").comptes)' 2>&1)
+[ "$out" = "plie
+False
+True" ] && ok "groupes : volet droit pliable, décompte facultatif" || ko "manques bash" "$out"
+
 # 10. LE CONTRAT ET LE CODE DISENT-ILS LA MÊME CHOSE ? API.md a documenté « API_COMPATIBLES »
 # pendant que le code ne l'avait pas : un appelant qui suit la documentation lit un attribut
 # inexistant et dégrade EN SILENCE. Ce test ferme la classe entière du défaut : tout nom

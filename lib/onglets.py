@@ -189,10 +189,11 @@ def ordonner(presents, reference):
 class Onglet:
     """Un onglet : un titre, de quoi produire son contenu (chargé à la première ouverture et gardé)."""
 
-    def __init__(self, titre, produire, genre="texte", action=None):
+    def __init__(self, titre, produire, genre="texte", action=None, comptes=True):
         self.titre = titre
         self.produire = produire
         self.genre = genre
+        self.comptes = comptes      # False : pas de nombre à côté des noms (groupe de réglage)
         self.action = action
         self.contenu = None
         self.total_ecran = 0            # lignes d'écran du dernier rendu (pages, G, compteur)
@@ -355,8 +356,11 @@ class Interface:
         self.position = " %d/%d " % (min(debut + hauteur, total), total) if total > hauteur else ''
 
     def colonne_gauche(self, o, noms, comptes, haut, hauteur):
+        """`comptes` à None : aucun nombre à côté des noms. Un décompte de lignes ne veut rien dire
+        pour un groupe qui est un RÉGLAGE — « catppuccin 6 » n'informe de rien."""
         o.rang = max(0, min(o.rang, len(noms) - 1))
-        colonne = min(26, max(14, max(len(t) for t in noms) + 6))
+        marge = 6 if comptes else 3
+        colonne = min(26, max(14, max(len(t) for t in noms) + marge))
         debut = max(0, min(o.rang - hauteur + 2, len(noms) - hauteur))
         o.colonne, o.debut_noms = colonne, debut
         for i, t in enumerate(noms[debut:debut + hauteur]):
@@ -369,8 +373,9 @@ class Interface:
                 # le focus est à droite : la section choisie reste reconnaissable, sans monopoliser
                 # l'attention — sinon on ne sait plus ce que l'on va déplacer
                 attr = curses.A_UNDERLINE | curses.A_BOLD
-            self.ecrire(haut + i, 1, t[: colonne - 6].ljust(colonne - 5), attr)
-            self.ecrire(haut + i, colonne - 4, "%3d" % comptes[rang], self.attr("portee"))
+            self.ecrire(haut + i, 1, t[: colonne - marge].ljust(colonne - marge + 1), attr)
+            if comptes:
+                self.ecrire(haut + i, colonne - 4, "%3d" % comptes[rang], self.attr("portee"))
         for y in range(hauteur):
             self.ecrire(haut + y, colonne, self.v_trait, self.attr("portee"))
         return colonne
@@ -386,7 +391,7 @@ class Interface:
             self.ecrire(haut + 1, 2, "rien ne correspond à « %s »" % self.filtre if self.filtre else "(aucun raccourci)",
                         self.attr("mauvais"))
             return
-        comptes = [sum(1 for e in entrees if e[1] == t) for t in themes]
+        comptes = [sum(1 for e in entrees if e[1] == t) for t in themes] if o.comptes else None
         colonne = self.colonne_gauche(o, themes, comptes, haut, hauteur)
         lignes = [e for e in entrees if e[1] == themes[o.rang]]
         # Colonne des sources : décidée d'après TOUTES les entrées de l'onglet, jamais d'après celles
@@ -440,12 +445,23 @@ class Interface:
                         self.attr("mauvais"))
             return
         noms = [n for n, _ in groupes]
-        colonne = self.colonne_gauche(o, noms, [len(ls) for _, ls in groupes], haut, hauteur)
+        comptes = None if not o.comptes else [len(ls) for _, ls in groupes]
+        colonne = self.colonne_gauche(o, noms, comptes, haut, hauteur)
         lignes = groupes[o.rang][1]
-        o.haut = max(0, min(o.haut, max(0, len(lignes) - hauteur)))
-        for i, l in enumerate(lignes[o.haut:o.haut + hauteur]):
-            self.ecrire(haut + i, colonne + 2, l, self.style_ligne(l))
-        self.compteur(haut, hauteur, largeur, o.haut, len(lignes))
+        # Le volet droit plie comme les autres : sans cela, la description d'un groupe était coupée
+        # au bord dès 91 colonnes. La suite est décalée de trois colonnes, comme pour le genre texte.
+        ecran = []
+        for l in lignes:
+            style = self.style_ligne(l)
+            morceaux = plier(l, max(1, largeur - colonne - 3))
+            ecran.append((colonne + 2, morceaux[0], style))
+            for suite in morceaux[1:]:
+                ecran.append((colonne + 5, suite, style))
+        o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
+        o.total_ecran = len(ecran)
+        for i, (x, texte, style) in enumerate(ecran[o.haut:o.haut + hauteur]):
+            self.ecrire(haut + i, x, texte, style)
+        self.compteur(haut, hauteur, largeur, o.haut, len(ecran))
 
     def style_ligne(self, l):
         nu = l.strip()
@@ -589,6 +605,9 @@ class Interface:
         nom = groupes[max(0, min(o.rang, len(groupes) - 1))][0]
         try:
             self.message = o.action(nom) or ""
+            # une action peut CHANGER le thème du shell : sans cela, le nouveau réglage ne se verrait
+            # qu'à la réouverture de l'interface
+            self.couleurs()
         except Exception as e:
             self.message = "échec : %s" % e
         rang = o.rang

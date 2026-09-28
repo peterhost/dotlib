@@ -108,7 +108,9 @@ testent — l'un d'eux n'a aucune copie de repli.
   ou si curses ne démarre pas, avec une ligne « `nom` : … » sur la sortie d'erreur (l'appelant
   affiche alors son contenu à la suite). Jamais d'exception de terminal ; le terminal est toujours
   rendu, y compris si un onglet lève.
-- `onglets.Onglet(titre, produire, genre="texte")` — `produire` est un appelable sans argument, appelé à la
+- `onglets.Onglet(titre, produire, genre="texte", comptes=True)` — `comptes=False` retire le nombre
+  affiché à côté de chaque nom dans la colonne de gauche : un décompte de lignes ne veut rien dire
+  pour un groupe qui est un RÉGLAGE (« catppuccin 6 » n'informe de rien). — `produire` est un appelable sans argument, appelé à la
   PREMIÈRE ouverture de l'onglet et gardé (`r` recharge). Une exception d'un producteur n'emporte
   pas l'interface : l'onglet affiche « illisible ».
   - `genre="texte"` : `produire()` → liste de lignes ;
