@@ -61,6 +61,18 @@ trouve=$(suivis | xargs grep -nE '\b[a-z0-9-]+\.(local|lan|home|internal|invalid
 [ -n "$trouve" ] && signaler "nom d'hôte local :
 $trouve"
 
+# Octets compilés Python : un .pyc porte le CHEMIN ABSOLU de son source, donc le nom du compte de
+# celui qui l'a produit. Il n'a rien à faire dans un dépôt, et encore moins dans un dépôt public —
+# le cas s'est produit dans un dépôt voisin. Ils sont ignorés par .gitignore ; ceci vérifie qu'aucun
+# n'a été ajouté de force, et que rien ne traîne dans l'arbre de travail.
+trouve=$(suivis | grep -E '(^|/)__pycache__/|\.pyc$')
+[ -n "$trouve" ] && signaler "octets compilés Python suivis par git :
+$trouve"
+trouve=$(find . -name '__pycache__' -not -path './.git/*' 2>/dev/null)
+[ -n "$trouve" ] && signaler "dossier __pycache__ présent dans l'arbre (à effacer ; les appelants
+    doivent poser sys.dont_write_bytecode = True avant d'importer) :
+$trouve"
+
 # ---------------------------------------------------------------- 2. identité des commits
 # Une adresse dans les métadonnées d'un commit est publique pour toujours : réécrire l'historique
 # après coup ne la retire ni des clones ni des caches de GitHub.
