@@ -18,8 +18,10 @@ TUIF='tui_title tui_info tui_ok tui_warn tui_err tui_die tui_confirm tui_ask tui
 ROLES='C_R_NUM C_R_DATE C_R_TEXT C_R_MATCH C_R_KEY C_R_PATH C_R_BAD C_R_NOTE'
 BASE='C_RESET C_BOLD C_DIM C_UL C_REV C_RED C_GREEN C_YELLOW C_BLUE C_MAGENTA C_CYAN C_GREY C_OK C_WARN C_ERR C_INFO'
 TVARS='T_RESET T_BOLD T_DIM T_UL T_REV T_RED T_GREEN T_YELLOW T_BLUE T_MAGENTA T_CYAN T_GREY'
-b_() {   # b_ BASH TERM COMMANDE : shell propre, HOME vide, dotlib chargé
-  env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM="$2" DOTLIB_DIR="$ROOT" DOTLIB_THEME=dark "$1" -c ". \"\$DOTLIB_DIR/lib/dotlib.sh\"; $3" 2>&1
+# Copie de dotlib SANS local/ : les réglages de l'utilisateur de cette machine ne doivent pas influer
+CLEAN="$TMP/propre"; mkdir -p "$CLEAN"; cp -R "$ROOT/lib" "$CLEAN/"
+b_() {   # b_ BASH TERM COMMANDE : shell propre, HOME vide, dotlib (copie propre) chargé
+  env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM="$2" DOTLIB_DIR="$CLEAN" DOTLIB_THEME=dark "$1" -c ". \"\$DOTLIB_DIR/lib/dotlib.sh\"; $3" 2>&1
 }
 mkdir -p "$TMP/h"
 for b in /bin/bash /opt/homebrew/bin/bash /usr/bin/bash /usr/local/bin/bash /opt/bin/bash; do
@@ -61,6 +63,81 @@ c=2" ] && [ "$conf" = "DOTLIB_PALETTE=nord" ] && ok "bash $v · dotlib_theme_set
   out=$(env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM=xterm-256color DOTLIB_DIR="$ROOT" "$b" -c ". \"\$DOTLIB_DIR/lib/tui.sh\"; for f in $TUIF; do declare -F \$f >/dev/null || echo \"manque \$f\"; done; for v in $TVARS; do eval \"[ -z \\\"\\\${\$v}\\\" ]\" || echo \"non vide \$v\"; done" 2>&1 </dev/null)
   [ -z "$out" ] && ok "bash $v · tui.sh : fonctions garanties, T_* vides hors terminal" || ko "bash $v · tui" "$out"
 done
+
+# --- Sonde du fond (OSC 11) : jamais hors d'un shell interactif sur terminal ; toujours restaurée ------
+E=$(printf '\033')
+for b in /bin/bash /opt/homebrew/bin/bash /usr/bin/bash; do
+  [ -x "$b" ] || continue
+  v=$("$b" -c 'echo ${BASH_VERSION%%(*}')
+  L='. "$DOTLIB_DIR/lib/dotlib.sh"; DOTLIB_OS=linux; unset LC_DOTLIB_THEME DOTLIB_THEME_DETECTED COLORFGBG; dotlib_palette_load; echo "T=$DOTLIB_THEME_EFF"'
+  out=$(env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM=xterm-256color DOTLIB_DIR="$CLEAN" "$b" -c "$L" 2>&1)
+  out2=$(env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM=xterm-256color DOTLIB_DIR="$CLEAN" "$b" --norc -i -c "$L" 2>&1 </dev/null)
+  case "$out$out2" in *"$E"*) ko "bash $v · sonde écrite hors terminal" "$(printf '%s' "$out$out2" | cat -v)" ;;
+    *) ok "bash $v · sonde : rien d'écrit en non interactif ni sans terminal (ssh hôte cmd, scripts)" ;; esac
+  # Frappes envoyées pendant le démarrage (ici : commande, exit, puis fin de flux = Ctrl-D) : la sonde ne
+  # doit pas les avaler — sinon le shell attend sans fin. On vérifie qu'il se termine de lui-même.
+  printf '. "$DOTLIB_DIR/lib/dotlib.sh"; DOTLIB_OS=linux; unset LC_DOTLIB_THEME DOTLIB_THEME_DETECTED COLORFGBG; dotlib_palette_load\n' > "$TMP/rc"
+  ( printf 'echo x\nexit\n' | env -i HOME="$TMP/h" TERM=xterm-256color PATH=/usr/bin:/bin DOTLIB_DIR="$CLEAN" \
+      script -q /dev/null "$b" --noprofile --rcfile "$TMP/rc" -i >/dev/null 2>&1 ) & pid=$!
+  i=0; while kill -0 $pid 2>/dev/null && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+  if kill -0 $pid 2>/dev/null; then pkill -P $pid 2>/dev/null; kill $pid 2>/dev/null; ko "bash $v · frappes d'avance avalées : shell bloqué"
+  else ok "bash $v · frappes envoyées au démarrage : pas avalées par la sonde (le shell se termine)"; fi
+  case $v in 3.*)
+    res=$( ( sleep 1; printf '%s\n' ". \"\$DOTLIB_DIR/lib/dotlib.sh\"; DOTLIB_OS=linux; unset LC_DOTLIB_THEME DOTLIB_THEME_DETECTED COLORFGBG; dotlib_palette_load; echo T=\$DOTLIB_THEME_EFF"; sleep 1.5; printf 'exit\n' ) \
+           | env -i HOME="$TMP/h" TERM=xterm-256color PATH=/usr/bin:/bin DOTLIB_DIR="$CLEAN" script -q /dev/null "$b" --norc --noprofile -i 2>&1 | tr -d '\r')
+    case $res in *']11;?'*) ko "bash $v · sonde envoyée en 3.2" ;; *T=dark*) ok "bash $v · bash 3.2 : pas de sonde (repli)" ;; *) ko "bash $v · 3.2" "$res" ;; esac
+    continue ;;
+  esac
+  for m in light dark none int; do
+    C="$L"; C=${C%%dotlib_palette_load*}"DOTLIB_PROBE_TIME=15; DOTLIB_PROBE_TTL=0; "
+    [ $m = int ] && C="$C (sleep 0.5; kill -INT \$\$) & "
+    C="$C dotlib_palette_load; echo \"T=\$DOTLIB_THEME_EFF\"; stty -a | grep -o -w -e icanon -e echo | sort -u | tr '\\n' ' '; echo FIN"
+    res=$( ( sleep 1; printf '%s\n' "$C"; sleep 0.5
+             case $m in (light) printf '\033]11;rgb:ffff/ffff/ffff\033\\' ;; (dark) printf '\033]11;rgb:1d1d/2020/2222\007' ;; esac
+             sleep 2.5; printf 'exit\n'; sleep 0.3 ) \
+           | env -i HOME="$TMP/h" TERM=xterm-256color PATH=/usr/bin:/bin DOTLIB_DIR="$CLEAN" script -q /dev/null "$b" --norc --noprofile -i 2>&1 \
+           | tr -d '\r' | grep -a -o -E 'T=[a-z]+|echo icanon FIN' | tr '\n' ' ')
+    want=dark; [ $m = light ] && want=light
+    [ "$res" = "T=$want echo icanon FIN " ] && ok "bash $v · sonde $m → $want, terminal restauré (echo, icanon)" || ko "bash $v · sonde $m" "$res"
+  done
+done
+
+# Le fond mesuré prime : sur un macOS (même en clair) et malgré un verdict « light » reçu par ssh
+for b in /opt/homebrew/bin/bash /usr/bin/bash; do
+  [ -x "$b" ] || continue
+  v=$("$b" -c 'echo ${BASH_VERSION%%(*}')
+  case $v in 3.*) continue ;; esac
+  for cas in "DOTLIB_OS=darwin; unset LC_DOTLIB_THEME" "DOTLIB_OS=linux; LC_DOTLIB_THEME=light"; do
+    C=". \"\$DOTLIB_DIR/lib/dotlib.sh\"; $cas; unset DOTLIB_THEME_DETECTED COLORFGBG SSH_CONNECTION; DOTLIB_PROBE_TIME=15; DOTLIB_PROBE_TTL=0; dotlib_palette_load; echo \"T=\$DOTLIB_THEME_EFF\""
+    res=$( ( sleep 1; printf '%s\n' "$C"; sleep 0.5; printf '\033]11;rgb:1d1d/2020/2222\033\\'; sleep 2; printf 'exit\n'; sleep 0.3 ) \
+           | env -i HOME="$TMP/h" TERM=xterm-256color PATH=/usr/bin:/bin DOTLIB_DIR="$CLEAN" script -q /dev/null "$b" --norc --noprofile -i 2>&1 \
+           | tr -d '\r' | grep -a -o -E 'T=[a-z]+' | tail -1)
+    [ "$res" = T=dark ] && ok "bash $v · fond sombre mesuré prime ($cas) → dark" || ko "bash $v · priorité de la sonde ($cas)" "$res"
+  done
+done
+
+# Mémoire de la sonde : un second shell reprend le résultat sans sonder ; dotlib_theme_set l'efface
+b=/opt/homebrew/bin/bash; [ -x "$b" ] || b=/usr/bin/bash
+if [ -x "$b" ] && [ "$("$b" -c 'echo $((BASH_VERSINFO[0]*10+BASH_VERSINFO[1]))')" -ge 42 ]; then
+  rm -f "$CLEAN/local/cache/fond"
+  P='. "$DOTLIB_DIR/lib/dotlib.sh"; DOTLIB_OS=linux; unset LC_DOTLIB_THEME DOTLIB_THEME_DETECTED COLORFGBG; DOTLIB_PROBE_TIME=15;'
+  sonde() {   # sonde RÉPONSE(light|none) COMMANDE_EN_PLUS → T=… (dernière valeur)
+    ( sleep 1; printf '%s\n' "$P dotlib_palette_load; ${2:-} echo T=\$DOTLIB_THEME_EFF"; sleep 0.5
+      [ "$1" = light ] && printf '\033]11;rgb:ffff/ffff/ffff\033\\'; sleep 2; printf 'exit\n'; sleep 0.3 ) \
+      | env -i HOME="$TMP/h" TERM=xterm-256color PATH=/usr/bin:/bin DOTLIB_DIR="$CLEAN" script -q /dev/null "$b" --norc --noprofile -i 2>&1 \
+      | tr -d '\r' | grep -a -o -E 'T=[a-z]+' | tail -1
+  }
+  [ "$(sonde light)" = T=light ] && [ -r "$CLEAN/local/cache/fond" ] && ok "sonde : résultat mémorisé (local/cache/fond)" || ko "mémoire écrite"
+  [ "$(sonde none)" = T=light ] && ok "second shell sans réponse du terminal : résultat repris de la mémoire, pas de nouvelle sonde" || ko "mémoire relue"
+  sonde none 'dotlib_theme_set DOTLIB_THEME auto;' >/dev/null
+  [ ! -e "$CLEAN/local/cache/fond" ] || [ "$(cut -d'|' -f3 "$CLEAN/local/cache/fond")" != light ] && ok "dotlib_theme_set : mémoire effacée (le fond sera mesuré à nouveau)" || ko "invalidation"
+  rm -f "$CLEAN/local/cache/fond" "$CLEAN/local/theme.conf"
+  sonde light >/dev/null
+  res=$( ( sleep 1; printf '%s\n' "$P dotlib_palette_load; echo T=\$DOTLIB_THEME_EFF"; sleep 2; printf 'exit\n'; sleep 0.3 ) \
+         | env -i HOME="$TMP/h" TERM=xterm TERM_PROGRAM=autre PATH=/usr/bin:/bin DOTLIB_DIR="$CLEAN" DOTLIB_PROBE_TIME=10 script -q /dev/null "$b" --norc --noprofile -i 2>&1 | tr -d '\r' | grep -a -o -E 'T=[a-z]+' | tail -1)
+  [ "$res" = T=dark ] && ok "autre terminal (TERM différent) : la mémoire d'un autre terminal n'est pas reprise" || ko "clé de mémoire" "$res"
+  rm -f "$CLEAN/local/cache/fond"
+fi
 
 # --- share/palettes.tsv à jour ----------------------------------------------------------------------
 if "$ROOT/bin/palettes-tsv" | cmp -s - "$ROOT/share/palettes.tsv"; then ok "share/palettes.tsv à jour (bin/palettes-tsv)"

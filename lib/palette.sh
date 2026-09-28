@@ -7,8 +7,9 @@
 #                   lucius | papercolor | pencil | xterm
 #                   (xterm : palette 256 couleurs historique ; « actuel », son ancien nom, reste accepté)
 #   DOTLIB_THEME    auto (défaut) | dark | light
-#                   auto : COLORFGBG, sinon LC_DOTLIB_THEME (transmis par ssh), sinon apparence macOS,
-#                   sinon sombre ; console linux : sombre
+#                   auto : COLORFGBG, sinon le fond réel du terminal (OSC 11, shell interactif seulement),
+#                   sinon LC_DOTLIB_THEME (transmis par ssh), sinon apparence macOS, sinon sombre ;
+#                   console linux : sombre
 #   DOTLIB_MATCH    fond (défaut) | texte   correspondances : fond coloré (Search de vim) ou texte gras
 # Fournis par l'appelant (sinon déduits de TERM / COLORTERM / NO_COLOR) :
 #   DOTLIB_COLORS   0 | 8 | 256 | 16m       profondeur du terminal
@@ -35,6 +36,85 @@ _dotlib_depth() {
   case ${COLORTERM:-} in truecolor|24bit) DOTLIB_COLORS=16m ;; esac
 }
 
+# Mémoire de la sonde : $DOTLIB_DIR/local/cache/fond, une ligne « clé|epoch|dark|light » (clé = TERM et
+# DOTLIB_TERM), valable DOTLIB_PROBE_TTL minutes (60). brc theme / dotlib_theme_set l'effacent.
+_DOTLIB_PROBE_CACHE=${DOTLIB_DIR:-$HOME/.dotlib}/local/cache/fond
+_dotlib_probe_key() { printf '%s' "${TERM:-}/${DOTLIB_TERM:-}"; }
+_dotlib_probe_cached() {   # pose DOTLIB_THEME_EFF depuis la mémoire si elle est fraîche ; 1 sinon
+  local k e t now line
+  [ "${BASH_VERSINFO[0]:-0}${BASH_VERSINFO[1]:-0}" -ge 42 ] || return 1      # printf %(%s)T
+  [ -r "$_DOTLIB_PROBE_CACHE" ] || return 1
+  IFS= read -r line < "$_DOTLIB_PROBE_CACHE" || return 1
+  k=${line%%|*}; line=${line#*|}; e=${line%%|*}; t=${line#*|}
+  [ "$k" = "$(_dotlib_probe_key)" ] || return 1
+  printf -v now '%(%s)T' -1
+  case $e in ''|*[!0-9]*) return 1 ;; esac
+  [ $(( now - e )) -lt $(( ${DOTLIB_PROBE_TTL:-60} * 60 )) ] || return 1
+  case $t in dark|light) DOTLIB_THEME_EFF=$t ;; *) return 1 ;; esac
+}
+_dotlib_probe_remember() {
+  local now
+  [ "${BASH_VERSINFO[0]:-0}${BASH_VERSINFO[1]:-0}" -ge 42 ] || return 0
+  printf -v now '%(%s)T' -1
+  { [ -d "${_DOTLIB_PROBE_CACHE%/*}" ] || mkdir -p "${_DOTLIB_PROBE_CACHE%/*}"; } 2>/dev/null &&
+    printf '%s|%s|%s\n' "$(_dotlib_probe_key)" "$now" "$DOTLIB_THEME_EFF" > "$_DOTLIB_PROBE_CACHE" 2>/dev/null
+  return 0
+}
+
+# _dotlib_probe_bg : demande au terminal sa couleur de fond (OSC 11) et pose DOTLIB_THEME_EFF (light si
+# luma > 128) ; 1 si rien de lisible. Le terminal répond par le flux lui-même : ça traverse ssh et tmux
+# sans rien demander au serveur. Conditions CUMULATIVES, sinon rien n'est écrit du tout : shell
+# interactif, entrée ET sortie sur un terminal, TERM utilisable, DOTLIB_PROBE≠0, bash ≥ 4, aucune frappe en
+# attente. Jamais dans
+# « ssh hôte commande », un script ou une pose : leur flux serait corrompu.
+# Délai : DOTLIB_PROBE_TIME dixièmes de seconde (3) ; terminal TOUJOURS restauré (trap EXIT INT TERM).
+_dotlib_probe_bg() {
+  case $- in *i*) ;; *) return 1 ;; esac
+  [ -t 0 ] && [ -t 1 ] || return 1
+  [ "${DOTLIB_PROBE:-1}" = 1 ] || return 1
+  case ${TERM:-dumb} in dumb|'') return 1 ;; esac
+  # Lignes déjà validées (Entrée) ou envoyées d'avance par un programme : on ne sonde pas, sinon la
+  # lecture les avalerait. ATTENTION, limite : une ligne en cours de frappe (pas encore validée) dort
+  # dans le tampon du pilote, read -t 0 ne la voit pas, et la sonde peut l'avaler. D'où la mémoire du
+  # résultat (_dotlib_probe_cache) : la sonde ne part qu'une fois par heure et par terminal, pas à
+  # chaque shell. bash 3.2 ne sait pas faire read -t 0 : pas de sonde du tout.
+  [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] || return 1
+  read -t 0 < /dev/tty 2>/dev/null && return 1
+  local old r= rgb R G B rest t_exit t_int t_term
+  old=$(stty -g 2>/dev/null) || return 1
+  t_exit=$(trap -p EXIT) t_int=$(trap -p INT) t_term=$(trap -p TERM)
+  trap 'stty "$old" 2>/dev/null' EXIT INT TERM
+  if stty raw -echo min 0 time "${DOTLIB_PROBE_TIME:-3}" 2>/dev/null; then
+    printf '\033]11;?\033\\' 2>/dev/null > /dev/tty
+    # dd et non « read » : read -d reprogramme le terminal (attente sans fin) ; dd respecte le délai.
+    # Une lecture rend d'ordinaire toute la réponse ; au plus deux de plus si elle arrive en morceaux
+    local i=0 part
+    while [ $i -lt 3 ]; do
+      part=$(dd bs=64 count=1 2>/dev/null < /dev/tty); r=$r$part
+      case $r in *$'\a'*|*$'\e\\'*|'') break ;; esac
+      i=$((i + 1))
+    done
+  fi
+  stty "$old" 2>/dev/null
+  if [ -n "$t_exit" ]; then eval "$t_exit"; else trap - EXIT; fi
+  if [ -n "$t_int" ]; then eval "$t_int"; else trap - INT; fi
+  if [ -n "$t_term" ]; then eval "$t_term"; else trap - TERM; fi
+  # rgb:RRRR/GGGG/BBBB (16 bits), rgb:RR/GG/BB (8 bits), #RRGGBB ; on garde l'octet de poids fort
+  case $r in
+    *rgb:*) rgb=${r#*rgb:}; R=${rgb%%/*}; rest=${rgb#*/}; G=${rest%%/*}; B=${rest#*/} ;;
+    *'#'[0-9a-fA-F]*) rgb=${r#*#}; R=${rgb:0:2}; G=${rgb:2:2}; B=${rgb:4:2} ;;
+    *) return 1 ;;
+  esac
+  B=${B%%[!0-9a-fA-F]*}
+  [ ${#R} = 1 ] && R=$R$R; [ ${#G} = 1 ] && G=$G$G; [ ${#B} = 1 ] && B=$B$B
+  R=${R:0:2} G=${G:0:2} B=${B:0:2}
+  case "$R$G$B" in ''|*[!0-9a-fA-F]*) return 1 ;; esac
+  [ ${#R} = 2 ] && [ ${#G} = 2 ] && [ ${#B} = 2 ] || return 1
+  if [ $(( (299 * 16#$R + 587 * 16#$G + 114 * 16#$B) / 1000 )) -gt 128 ]; then DOTLIB_THEME_EFF=light
+  else DOTLIB_THEME_EFF=dark; fi
+  _dotlib_probe_remember
+}
+
 # _dotlib_theme_resolve : DOTLIB_THEME_EFF d'après DOTLIB_THEME
 _dotlib_theme_resolve() {
   local bg
@@ -45,16 +125,20 @@ _dotlib_theme_resolve() {
   [ "${DOTLIB_TERM:-}" = console ] && { DOTLIB_THEME_EFF=dark; return; }
   # Déjà déterminé par un shell parent
   case ${DOTLIB_THEME_DETECTED:-} in dark|light) DOTLIB_THEME_EFF=$DOTLIB_THEME_DETECTED; return ;; esac
+  # Ordre (décidé avec l'utilisateur) : ce que le TERMINAL dit ou montre prime sur les préférences de
+  # fenêtres du système — c'est le fond réel qui décide de la lisibilité du texte.
   DOTLIB_THEME_EFF=dark
-  if [ -n "${COLORFGBG:-}" ]; then          # « fg;bg » (rxvt, Konsole, iTerm2 si activé…)
+  if [ -n "${COLORFGBG:-}" ]; then          # « fg;bg » : le terminal se déclare lui-même
     bg=${COLORFGBG##*;}
     case $bg in 7|9|1[0-5]) DOTLIB_THEME_EFF=light ;; esac
-  elif [ -n "${LC_DOTLIB_THEME:-}" ]; then     # transmis par ssh depuis le Mac (SendEnv LC_*)
+  elif _dotlib_probe_cached || _dotlib_probe_bg; then
+    :                                          # fond réel mesuré (OSC 11, mémorisé 1 h), shell interactif
+  elif [ -n "${LC_DOTLIB_THEME:-}" ]; then     # verdict de la machine d'où l'on vient (ssh, SendEnv LC_*)
     DOTLIB_THEME_EFF=$LC_DOTLIB_THEME
   elif [ "${DOTLIB_OS:-}" = darwin ] && [ -z "${SSH_CONNECTION:-}" ]; then
-    # Apparence macOS (y compris le mode automatique jour/nuit) : « Dark » ou rien. ≈ 7 ms, une fois :
+    # Apparence macOS (préférence de fenêtres, y compris jour/nuit) : « Dark » ou rien. ≈ 7 ms, une fois :
     # le résultat est exporté aux shells enfants
-    case $(defaults read -g AppleInterfaceStyle 2>/dev/null) in Dark) ;; *) DOTLIB_THEME_EFF=light ;; esac
+    command -v defaults >/dev/null 2>&1 && case $(defaults read -g AppleInterfaceStyle 2>/dev/null) in Dark) ;; *) DOTLIB_THEME_EFF=light ;; esac
   fi
   export DOTLIB_THEME_DETECTED=$DOTLIB_THEME_EFF
   # Vers les machines où l'on se connecte (ssh transmet LC_* quand le serveur l'accepte)
@@ -231,5 +315,6 @@ dotlib_theme_set() {
   printf '%s%s=%s\n' "$out" "$k" "$v" > "$f" || return 1
   eval "$k=\$v"
   unset DOTLIB_THEME_DETECTED
+  rm -f "$_DOTLIB_PROBE_CACHE" 2>/dev/null           # thème changé : le fond sera mesuré à nouveau
   dotlib_palette_load
 }
