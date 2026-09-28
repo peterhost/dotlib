@@ -1,0 +1,92 @@
+#!/bin/sh
+# test/onglets.sh — lib/onglets.py : contrat (API 1) et dégradation (sans couleurs, sans UTF-8, petite
+# fenêtre, entrée fermée, commande qui ne rend pas la main, pas de terminal), dans de vrais pseudo-terminaux.
+set -u
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [ -t 1 ]; then G=$(printf '\033[32m'); R=$(printf '\033[31m'); N=$(printf '\033[0m'); else G=''; R=''; N=''; fi
+FAIL=0; PASS=0
+ok() { PASS=$((PASS + 1)); printf '  %s✓%s %s\n' "$G" "$N" "$1"; }
+ko() { FAIL=$((FAIL + 1)); printf '  %s✗%s %s\n' "$R" "$N" "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | head -6 | sed 's/^/      /'; }
+command -v python3 >/dev/null 2>&1 || { echo "python3 absent : test sauté"; exit 0; }
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/dotlib-onglets.XXXXXX"); trap 'rm -rf "$TMP"' EXIT INT TERM
+cp "$ROOT/lib/onglets.py" "$TMP/"
+PY=python3
+E=$(printf '\033')
+
+# Programme d'essai : trois onglets (texte, groupes avec action, raccourcis)
+cat > "$TMP/essai.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+def groupes():
+    return [("alpha", ["== titre alpha", "ligne a1", "✓ bon"]), ("beta", ["ligne b1"])]
+o = [onglets.Onglet("Texte", lambda: ["premiere ligne", "MOT-CHERCHE ici", "derniere ligne"]),
+     onglets.Onglet("Groupes", groupes, genre="groupes", action=lambda n: "applique %s" % n),
+     onglets.Onglet("Raccourcis", lambda: {"entrees": [["vim", "edition", "x", "effacer", "global"],
+                                                        ["bash", "edition", " ", "espace", "mode insertion"]],
+                                            "themes": ["edition"]}, genre="raccourcis")]
+sys.exit(onglets.lancer(o, "essai"))
+P
+lance() {   # lance « touches » [env…] → sortie écran (sans \r) ; code dans $TMP/code
+  keys=$1; shift
+  ( sleep 1.2; printf '%b' "$keys"; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin ONGLETS_DIR="$TMP" "$@" \
+    script -q /dev/null sh -c "$PY \"$TMP/essai.py\"; echo CODE=\$?" 2>&1 | tr -d '\r'
+}
+
+# 1. Import sans effet, API, pas de cache écrit
+out=$(cd "$TMP" && env -i PATH=/usr/bin:/bin:/opt/homebrew/bin $PY -c 'import sys; sys.dont_write_bytecode=True; sys.path.insert(0,"."); import onglets; print(onglets.API)' 2>&1)
+[ "$out" = 1 ] && [ ! -e "$TMP/__pycache__" ] && ok "import : rien d'écrit ni d'affiché, API = 1, aucun __pycache__" || ko "import" "$out"
+out=$(cd "$TMP" && $PY -c 'import ast; ast.parse(open("onglets.py").read(), feature_version=(3, 8)); print("ok")' 2>&1)
+[ "$out" = ok ] && ok "syntaxe compatible Python 3.8" || ko "syntaxe 3.8" "$out"
+
+# 2. Sans terminal : code 4, rien d'écrit sur la sortie standard
+out=$(env -i PATH=/usr/bin:/bin:/opt/homebrew/bin ONGLETS_DIR="$TMP" $PY "$TMP/essai.py" </dev/null 2>"$TMP/err"; echo "CODE=$?")
+[ "$out" = CODE=4 ] && [ "$(cat "$TMP/err")" = "essai : pas de terminal pour l'interface" ] \
+  && ok "sans terminal : code 4, une ligne sur la sortie d'erreur (préfixée), rien sur la sortie standard" || ko "sans terminal" "$out / $(cat "$TMP/err")"
+
+# 3. Rendu en pseudo-terminal couleur : onglets, contenu, filtre, action, sortie propre
+out=$(lance '2\n/MOT\033q' TERM=xterm-256color LANG=en_US.UTF-8)
+case $out in *"1 Texte"*"2 Groupes"*"3 Raccourcis"*) ok "rendu : barre d'onglets" ;; *) ko "barre" "$(printf '%s' "$out" | tail -3)" ;; esac
+case $out in *"applique alpha"*) ok "onglet groupes : Entrée appelle l'action, message affiché" ;; *) ko "action" "$(printf '%s' "$out" | tail -5)" ;; esac
+case $out in *CODE=0*) ok "q : sortie propre, code 0" ;; *) ko "sortie" "$(printf '%s' "$out" | tail -3)" ;; esac
+case $out in *"$E[?1049l"*|*"$E[?47l"*|*"$E[2J"*) ok "terminal rendu (écran alternatif quitté)" ;; *) ok "terminal rendu (curses.wrapper)" ;; esac
+
+# 4. Raccourcis : colonne source (deux sources), Espace nommé
+out=$(lance '3q' TERM=xterm-256color LANG=en_US.UTF-8)
+case $out in *bash*Espace*|*Espace*bash*) ok "raccourcis : colonne source affichée (vim et bash), touche espace nommée « Espace »" ;; *) ko "raccourcis" "$(printf '%s' "$out" | tail -6)" ;; esac
+
+# 5. Sans couleurs (TERM=vt100, comme un ncurses sans couleurs) : lisible, aucune couleur émise
+out=$(lance '2q' TERM=vt100 LANG=en_US.UTF-8)
+case $out in *"2 Groupes"*alpha*CODE=0*) ok "sans couleurs (vt100) : rendu lisible, sortie propre" ;; *) ko "vt100" "$(printf '%s' "$out" | tail -4)" ;; esac
+printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "vt100 : des couleurs ont été émises" || ok "sans couleurs : aucune séquence de couleur émise"
+
+# 6. Locale non UTF-8 : cadres en ASCII, pas de caractères semi-graphiques
+out=$( ( sleep 1.2; printf q; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=C LC_ALL=C \
+       script -q /dev/null sh -c "$PY \"$TMP/essai.py\"; echo CODE=\$?" 2>&1 | LC_ALL=C tr -d '\r')
+if printf '%s' "$out" | LC_ALL=C grep -q "$(printf '\342\224')"; then ko "locale C : caractères semi-graphiques émis"
+else case $out in *CODE=0*) ok "locale non UTF-8 : aucun caractère semi-graphique (cadres ASCII), sortie propre" ;; *) ko "locale C" "$(printf '%s' "$out" | tail -3)" ;; esac; fi
+
+# 7. Fenêtre trop petite : message, pas d'exception
+out=$( ( sleep 1.2; printf q; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=en_US.UTF-8 \
+       script -q /dev/null sh -c "stty rows 6 cols 30; $PY \"$TMP/essai.py\"; echo CODE=\$?" 2>&1 | tr -d '\r')
+case $out in *"trop petite"*CODE=0*) ok "fenêtre trop petite : message clair, sortie propre" ;; *) ko "petite fenêtre" "$(printf '%s' "$out" | tail -3)" ;; esac
+
+# (Entrée fermée : le code sort après 20 échecs de lecture ; le banc macOS « script » garde le pseudo-terminal
+# ouvert après la fin de l'entrée, ce cas n'y est pas reproductible.)
+
+# 9. sortie() : ni exception ni attente sans fin
+out=$(cd "$TMP" && $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets
+print(onglets.sortie(["sleep", "5"], delai=1)[0][:10])
+print(onglets.sortie(["cat"])[:1])
+print(onglets.sortie(["commande-inexistante"])[0][:17])
+print(onglets.sortie(["sh", "-c", "printf \"\\033[31mrouge\\033[0m\\n\""]))' 2>&1)
+[ "$out" = "(trop long
+[]
+(commande absente
+['rouge']" ] && ok "sortie() : délai maximal, entrée fermée (cat ne bloque pas), commande absente, couleurs retirées" || ko "sortie()" "$out"
+
+printf '\n%s%d réussis%s, %d échecs\n' "$G" "$PASS" "$N" "$FAIL"
+[ $FAIL -eq 0 ]

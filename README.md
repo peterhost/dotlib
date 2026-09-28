@@ -39,7 +39,7 @@ Rien n'est écrit hors de `~/.dotlib`. Les réglages de l'utilisateur vivent dan
 ## Tests
 
 ```sh
-make check        # test/contract.sh : API, palettes, pose
+make check        # test/*.sh : contrat (API, palettes, pose), interface à onglets, anti-fuite
 make hooks        # installe le crochet pre-push (tests avant chaque poussée)
 ```
 

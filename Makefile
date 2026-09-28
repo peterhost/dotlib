@@ -1,7 +1,7 @@
 # Makefile — dotlib
 .PHONY: check palettes hooks
 check:
-	@sh test/contract.sh
+	@sh test/contract.sh && sh test/onglets.sh && sh test/anti-fuite.sh
 palettes:
 	@bin/palettes-tsv > share/palettes.tsv
 hooks:

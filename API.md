@@ -84,3 +84,26 @@ Contrat de pose des modules tiers : options `--check` `--json` `--yes` `--dry-ru
 codes 0 conforme, 1 erreur ou occupé, 2 usage, 3 dégradé, 4 absent, 5 mise à jour disponible,
 6 dépôt inaccessible (réseau), 7 outil manquant sur la machine (git) — 7 est distinct de 6 :
 il se règle en une commande, que le message donne.
+
+## Interface à onglets (`lib/onglets.py`, Python ≥ 3.8)
+
+`onglets.API = 1` (entier, même règle d'évolution). Rien à l'import : ni terminal, ni processus, ni fichier.
+L'appelant pose `sys.dont_write_bytecode = True` avant l'import (aucun `__pycache__` dans `~/.dotlib`).
+
+- `lancer(onglets, nom="")` → `0` à la sortie ; `4` sans terminal ou si curses ne démarre pas, avec une ligne
+  « `nom` : … » sur la sortie d'erreur (l'appelant affiche alors son contenu à la suite). Jamais d'exception de
+  terminal ; le terminal est toujours rendu.
+- `Onglet(titre, produire, genre="texte", action=None)` — `produire` est un appelable sans argument, appelé à la
+  première ouverture de l'onglet, résultat gardé (`r` recharge). `liste=True` : ancien nom de `genre="raccourcis"`.
+  - `texte` : `produire()` → liste de lignes (une ligne commençant par `==` est un titre, `✓` / `✗` / `!` un état) ;
+  - `raccourcis` : `produire()` → `{"entrees": [[source, thème, touches, description, portée], …], "themes": [ordre]}` ;
+    les thèmes présents sont rangés selon `themes`, les autres à la suite ;
+  - `groupes` : `produire()` → `[(nom, [lignes]), …]` ; `action(nom)` facultative, appelée par Entrée, renvoie un
+    message ; l'onglet est ensuite rechargé.
+- `sortie(commande, cwd=None, env=None, delai=60)` → lignes sans couleurs ; `NO_COLOR=1`, `TERM` réel conservé,
+  entrée fermée, délai maximal ; jamais d'exception (commande absente, trop longue : une ligne entre parenthèses).
+- `lire_tsv(lignes, colonnes=5)`, `ordonner(presents, reference)` : aides.
+
+Touches : ←→ Tab Maj-Tab `1`…`9` (onglets), ↑↓ `j` `k`, PgUp PgDn Espace, `g` `G`, `/` filtre (Échap l'efface),
+Entrée (action), `r` recharger, `q` quitter. Dégradation garantie et testée : sans couleurs (monochrome), locale
+non UTF-8 (cadres ASCII), fenêtre plus petite que 40×10 (message), entrée fermée (sortie après 20 échecs).
