@@ -1,8 +1,17 @@
 # dotlib — règles de travail
 
-Bibliothèque d'interface partagée (couleurs, affichage, conseils d'installation), utilisée par
-`~/.bash`, `~/.vim` et le parc SSH. Elle est posée en `~/.dotlib` sur toutes les machines par
-l'outil `parc`, et récupérée d'elle-même par `~/.bash` si elle manque.
+L'endroit neutre et public où vivent les réglages partagés entre configurations personnelles :
+le thème et la table des palettes, lus par `~/.bash` comme par `~/.vim`. Posée en `~/.dotlib` sur
+toutes les machines par l'outil `parc`, récupérée d'elle-même par `~/.bash` si elle manque.
+
+**Ce qu'elle n'est pas** : une bibliothèque à la recherche d'usagers. La couche d'affichage shell
+qu'elle contient n'a qu'un consommateur, `~/.bash` ; `~/.vim` ne lui emprunte aucun code et se
+contente de lire le réglage de thème ; le parc SSH n'en dépendra jamais (son `~/.ssh` est copié tel
+quel sur des machines vierges et doit fonctionner seul). Ce qui justifie ce dépôt séparé est le
+partage du RÉGLAGE, pas le partage du code : il doit être lisible là où la configuration du shell
+n'ira pas — compte d'un tiers, machine dédiée — et seul un dépôt public s'y installe sans clé.
+Si un jour la couche d'affichage trouve un second usager, tant mieux ; en attendant, on ne fait pas
+semblant.
 
 **Ce dépôt est PUBLIC.** Tout ce qui y entre est visible par n'importe qui, pour toujours : une
 poussée ne se rattrape pas, réécrire l'historique ne retire rien des clones ni des caches.
