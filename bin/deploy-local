@@ -18,7 +18,10 @@
 #   --branch B         branche (défaut : master)
 #   --from-clone C     adopter le clone C au lieu de cloner (il doit venir du même dépôt) ; C est
 #                      supprimé ensuite, qu'il soit adopté ou non
-#   --posed-by X       qui pose : parc (défaut) ou shell — information seulement
+#   --posed-by X       qui pose : parc (défaut), bash (la pose de ~/.bash) ou shell (sa récupération
+#                      automatique) — information seulement, jamais prise en compte dans le verdict.
+#                      Trois voies, trois réponses : un état inattendu ne s'enquête pas pareil selon
+#                      celle qui a posé.
 #   --expect C         commit attendu : --check répond 5 si la machine est différente
 #   --remote           avec --check : interroge le dépôt pour savoir s'il y a plus récent
 #   --yes              aucune question (défaut si l'entrée n'est pas un terminal)
@@ -67,7 +70,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-case $POSED_BY in parc|shell) ;; *) echo "--posed-by : parc ou shell" >&2; exit 2 ;; esac
+case $POSED_BY in parc|shell|bash) ;; *) echo "--posed-by : parc, shell ou bash" >&2; exit 2 ;; esac
 
 LOCK="$DIR.lock"
 STAMP=$(date +%Y%m%d-%H%M%S)
