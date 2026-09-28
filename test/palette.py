@@ -33,7 +33,10 @@ def avec(module, **env):
 
 
 def main():
-    chemin = sys.argv[1] if len(sys.argv) > 1 else "/Users/atolia/.vim/bin/vrc-interface"
+    if len(sys.argv) < 2:                      # pas de chemin par défaut : un chemin en dur porte
+        print("usage : %s <chemin du module>" % sys.argv[0])   # le nom d'un compte, donc une fuite
+        raise SystemExit(2)
+    chemin = sys.argv[1]
     module = charger(chemin)
     if not hasattr(module, "palette_dotlib"):
         print("ÉCHEC : %s n'expose pas palette_dotlib()" % chemin); return 1
