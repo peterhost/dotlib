@@ -30,3 +30,7 @@ Rien n'est écrit hors de `~/.dotlib`. Les réglages de l'utilisateur vivent dan
 make check        # test/contract.sh : API, palettes, pose
 make hooks        # installe le crochet pre-push (tests avant chaque poussée)
 ```
+
+## Licence
+
+MIT — voir `LICENSE`.
