@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# bin/palettes-tsv — décrit les palettes de lib/palette.sh en TSV (share/palettes.tsv) :
+#   palette <TAB> thème <TAB> rôle <TAB> RRGGBB <TAB> index 256
+# Rôles : num date text match_fg match_bg key path bad note (couleurs de rôle),
+#         surface text_on_surface crust (pastilles : fond neutre, texte, texte sur la couleur).
+# Pour les programmes qui ne sont pas en shell (interface python…) : lire ce fichier s'il existe.
+# Généré ; test/contract.sh vérifie que share/palettes.tsv est à jour.
+set -eu
+DOTLIB_DIR=$(cd "$(dirname "$0")/.." && pwd)
+. "$DOTLIB_DIR/lib/palette.sh"
+roles='num date text match_fg match_bg key path bad note'
+for pal in $DOTLIB_PALETTES; do
+  for th in dark light; do
+    DOTLIB_PALETTE=$pal DOTLIB_THEME_EFF=$th
+    _dotlib_palette_data
+    set -- $roles
+    for v in $_p; do
+      [ "$v" = - ] || printf '%s\t%s\t%s\t%s\t%s\n' "$pal" "$th" "$1" "${v%/*}" "${v#*/}"
+      shift
+    done
+    _dotlib_pill_base
+    set -- surface text_on_surface crust
+    for v in $_pb; do printf '%s\t%s\t%s\t%s\t%s\n' "$pal" "$th" "$1" "${v%/*}" "${v#*/}"; shift; done
+  done
+done

@@ -1,0 +1,248 @@
+#!/bin/sh
+# bin/deploy-local — pose, met à jour ou décrit dotlib SUR LA MACHINE OÙ CE SCRIPT TOURNE (sh POSIX).
+#
+#   ssh <hôte> 'sh -s -- --check --json [--expect C]' < bin/deploy-local   état (n'écrit rien ;
+#                                                                          marche sur une machine vierge)
+#   ssh <hôte> 'sh -s -- --json --dry-run' < bin/deploy-local              plan (n'écrit rien)
+#   ssh <hôte> 'sh -s -- --yes --json' < bin/deploy-local                  pose ou mise à jour
+#   ssh <hôte> 'sh -s -- --purge --yes --json' < bin/deploy-local          efface tout
+#   sh CLONE/bin/deploy-local --yes --json --quiet --from-clone CLONE      adopte un clone déjà fait
+#
+# LE DÉPÔT FAIT FOI : clone complet (jamais superficiel) ou fetch + avance rapide, rien d'autre.
+# Toute modification de ~/.dotlib se fait sous un verrou (~/.dotlib.lock, mkdir atomique) : une
+# pose concurrente renonce (code 1, « occupé ») ; un verrou de plus de 10 minutes est repris.
+# Le dossier final apparaît d'un coup (mv) ; local/ (réglages de l'utilisateur) est toujours conservé.
+#
+#   --dir D            dossier (défaut : ~/.dotlib)
+#   --repo-url URL     dépôt (défaut : le dépôt public, en https : ni clé ni agent)
+#   --branch B         branche (défaut : master)
+#   --from-clone C     adopter le clone C au lieu de cloner (il doit venir du même dépôt) ; C est
+#                      supprimé ensuite, qu'il soit adopté ou non
+#   --posed-by X       qui pose : parc (défaut) ou shell — information seulement
+#   --expect C         commit attendu : --check répond 5 si la machine est différente
+#   --remote           avec --check : interroge le dépôt pour savoir s'il y a plus récent
+#   --yes              aucune question (défaut si l'entrée n'est pas un terminal)
+#   --json             sortie standard = UNE ligne JSON ; les étapes vont sur la sortie d'erreur
+#   --quiet            aucune étape sur la sortie d'erreur
+#   --dry-run          dit ce qui serait fait, sans rien modifier
+#   --check            état, sans rien modifier
+#   --purge            efface dotlib (local/ compris) et ses restes
+#
+# Codes de sortie : 0 conforme, 1 erreur (ou occupé), 2 usage, 3 installé mais dégradé,
+# 4 absent, 5 mise à jour disponible, 6 réseau ou dépôt inaccessible (rien n'a été modifié).
+# Ce script ne connaît aucune machine : tout vient de la machine elle-même et des arguments.
+
+set -u
+for d in /opt/bin /opt/sbin /usr/local/bin; do
+  case ":$PATH:" in *":$d:"*) ;; *) [ -d "$d" ] && PATH="$PATH:$d" ;; esac
+done
+export PATH GIT_TERMINAL_PROMPT=0
+
+DIR="$HOME/.dotlib"
+REPO_URL="https://github.com/peterhost/dotlib.git"
+BRANCH=master
+YES=0; JSON=0; DRY=0; QUIET=0; MODE=deploy; CLONE=; POSED_BY=parc; EXPECT=; REMOTE=0
+[ -t 0 ] || YES=1
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --dir) shift; DIR=${1:-} ;;
+    --repo-url) shift; REPO_URL=${1:-} ;;
+    --branch) shift; BRANCH=${1:-master} ;;
+    --from-clone) shift; CLONE=${1:-} ;;
+    --posed-by) shift; POSED_BY=${1:-parc} ;;
+    --expect) shift; EXPECT=${1:-} ;;
+    --remote) REMOTE=1 ;;
+    -y|--yes) YES=1 ;;
+    --json) JSON=1 ;;
+    --quiet) QUIET=1 ;;
+    --dry-run) DRY=1 ;;
+    --check|--etat) MODE=check ;;
+    --purge) MODE=purge ;;
+    -h|--help) sed -n '2,/^set -u/p' "$0" 2>/dev/null | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Option inconnue : $1 (voir --help)" >&2; exit 2 ;;
+  esac
+  shift
+done
+case $POSED_BY in parc|shell) ;; *) echo "--posed-by : parc ou shell" >&2; exit 2 ;; esac
+
+LOCK="$DIR.lock"
+STAMP=$(date +%Y%m%d-%H%M%S)
+say() { [ "$QUIET" = 1 ] || echo "dotlib : $*" >&2; }
+js() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\t' '  ')"; }
+jb() { if [ "$1" = 1 ]; then printf true; else printf false; fi; }
+G() { git "$@" </dev/null; }
+
+# --- État ---------------------------------------------------------------------------------------------
+detect() {
+  INSTALLED=0; KIND=absent; COMMIT=; ORIGIN=; SHALLOW=0; DIRTY=0; API=; PB=; PDATE=
+  if [ -f "$DIR/lib/dotlib.sh" ]; then
+    INSTALLED=1; KIND=copie
+    API=$(sed -n 's/^DOTLIB_API=\([0-9][0-9]*\).*/\1/p' "$DIR/lib/dotlib.sh" | head -1)
+    if [ -d "$DIR/.git" ] && command -v git >/dev/null 2>&1; then
+      KIND=git
+      COMMIT=$(G -C "$DIR" rev-parse --short HEAD 2>/dev/null)
+      ORIGIN=$(G -C "$DIR" remote get-url origin 2>/dev/null)
+      [ "$(G -C "$DIR" rev-parse --is-shallow-repository 2>/dev/null)" = true ] && SHALLOW=1
+      [ -n "$(G -C "$DIR" status --porcelain --untracked-files=no 2>/dev/null)" ] && DIRTY=1
+    fi
+    if [ -r "$DIR/local/.pose" ]; then
+      PB=$(sed -n 's/^posed_by=//p' "$DIR/local/.pose"); PDATE=$(sed -n 's/^date=//p' "$DIR/local/.pose")
+    fi
+  elif [ -e "$DIR" ]; then
+    KIND=inconnu
+  fi
+  # Restes d'une pose interrompue : clones temporaires et verrou de plus de 10 minutes
+  LEFTOVERS=
+  for d in "$DIR".tmp.*; do
+    [ -d "$d" ] || continue
+    [ -n "$(find "$d" -maxdepth 0 -mmin +10 2>/dev/null)" ] && LEFTOVERS="$LEFTOVERS ${d##*/}"
+  done
+  LOCK_STALE=0
+  [ -d "$LOCK" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ] && LOCK_STALE=1
+  REMOTE_COMMIT=
+  if [ "$REMOTE" = 1 ] && [ "$KIND" = git ]; then
+    REMOTE_COMMIT=$(G ls-remote "${ORIGIN:-$REPO_URL}" "refs/heads/$BRANCH" 2>/dev/null | cut -c1-7)
+  fi
+  # Statut et code
+  STATUS=ok; CODE=0; WHY=
+  if [ "$INSTALLED" = 0 ]; then STATUS=absent; CODE=4; WHY="dotlib n'est pas installé"
+  else
+    [ "$KIND" = git ] || WHY="copie sans git"
+    [ "$SHALLOW" = 1 ] && WHY="${WHY:+$WHY ; }clone superficiel"
+    [ "$DIRTY" = 1 ] && WHY="${WHY:+$WHY ; }fichiers suivis modifiés sur place"
+    [ -n "$API" ] || WHY="${WHY:+$WHY ; }version d'API illisible"
+    if [ -n "$WHY" ]; then STATUS=degrade; CODE=3
+    else
+      want=${EXPECT:-$REMOTE_COMMIT}
+      if [ -n "$want" ] && [ -n "$COMMIT" ]; then
+        case $want in "$COMMIT"*|"${COMMIT%???}"*) ;; *) case $COMMIT in "$want"*) ;; *) STATUS=maj; CODE=5; WHY="$COMMIT ≠ $want" ;; esac ;; esac
+      fi
+    fi
+  fi
+}
+
+state_json() {
+  printf '{"module":"dotlib","installed":%s,"kind":%s,"status":%s,"why":%s,"dir":%s,"commit":%s,"expected_commit":%s,"remote_commit":%s,"origin":%s,"shallow":%s,"local_changes":%s,"api":%s,"posed_by":%s,"posed_at":%s,"leftovers":%s,"lock_stale":%s,"git":%s,"exit":%s}' \
+    "$(jb "$INSTALLED")" "$(js "$KIND")" "$(js "$STATUS")" "$(js "$WHY")" "$(js "$DIR")" "$(js "$COMMIT")" \
+    "$(js "$EXPECT")" "$(js "$REMOTE_COMMIT")" "$(js "$ORIGIN")" "$(jb "$SHALLOW")" "$(jb "$DIRTY")" "$(js "$API")" \
+    "$(js "$PB")" "$(js "$PDATE")" "$(js "${LEFTOVERS# }")" "$(jb "$LOCK_STALE")" \
+    "$(js "$(git --version 2>/dev/null | sed 's/^git version //')")" "$CODE"
+}
+
+finish() {   # finish ACTION : dernier état, sortie
+  detect
+  if [ "$JSON" = 1 ]; then printf '{"action":%s,"state":' "$(js "$1")"; state_json; printf '}\n'
+  else echo "dotlib : $1 · état : $STATUS${WHY:+ ($WHY)}${COMMIT:+ · $COMMIT}"; fi
+  exit $CODE
+}
+
+fail() {     # fail MESSAGE [code] : rien n'a été modifié (sauf mention contraire)
+  rc=${2:-1}
+  [ -n "$CLONE" ] && [ -d "$CLONE" ] && case $CLONE in "$DIR".tmp.*) rm -rf "$CLONE" ;; esac
+  if [ "$JSON" = 1 ]; then printf '{"module":"dotlib","error":%s,"exit":%s}\n' "$(js "$1")" "$rc"
+  else echo "dotlib : $1" >&2; fi
+  exit "$rc"
+}
+
+# --- Verrou -------------------------------------------------------------------------------------------
+HAVE_LOCK=0
+lock() {
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+      say "verrou de plus de 10 minutes repris ($(cat "$LOCK/info" 2>/dev/null))"
+      rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null || fail "occupé : une autre pose est en cours" 1
+    else
+      fail "occupé : une autre pose est en cours ($(cat "$LOCK/info" 2>/dev/null))" 1
+    fi
+  fi
+  HAVE_LOCK=1
+  printf 'pid=%s\ndate=%s\nby=%s\n' "$$" "$STAMP" "$POSED_BY" > "$LOCK/info"
+  trap 'rm -rf "$LOCK"' EXIT
+  trap 'exit 1' INT TERM HUP
+}
+
+# --- Modes --------------------------------------------------------------------------------------------
+detect
+if [ "$MODE" = check ]; then
+  if [ "$JSON" = 1 ]; then state_json; printf '\n'
+  else
+    echo "dotlib : $STATUS${WHY:+ ($WHY)} · $KIND${COMMIT:+ · $COMMIT}${API:+ · API $API}${PB:+ · posé par $PB le $PDATE}"
+    [ -n "$LEFTOVERS" ] && echo "  restes d'une pose interrompue :$LEFTOVERS"
+    [ "$LOCK_STALE" = 1 ] && echo "  verrou abandonné : $LOCK"
+  fi
+  exit $CODE
+fi
+
+if [ "$MODE" = purge ]; then
+  TODO="effacer $DIR (local/ compris) et ses restes"
+  if [ "$DRY" = 1 ]; then [ "$JSON" = 1 ] && printf '{"module":"dotlib","action":"dry-run","a_faire":%s}\n' "$(js "$TODO")" || echo "à faire : $TODO"; exit 0; fi
+  [ "$YES" = 1 ] || fail "--purge demande --yes" 2
+  lock
+  rm -rf "$DIR" "$DIR".tmp.* "$DIR".previous-* && say "effacé : $DIR"
+  finish purge
+fi
+
+case $KIND in
+  absent)  TODO="installer (clone de $REPO_URL)" ;;
+  git)     TODO="mettre à jour (fetch + avance rapide)" ;;
+  copie)   TODO="remplacer la copie sans git par un clone (local/ conservé)" ;;
+  *)       TODO="mettre $DIR de côté ($DIR.previous-$STAMP) puis installer" ;;
+esac
+[ -n "$CLONE" ] && TODO="$TODO, à partir du clone $CLONE"
+if [ "$DRY" = 1 ]; then
+  if [ "$JSON" = 1 ]; then printf '{"module":"dotlib","action":"dry-run","a_faire":%s,"exit":%s}\n' "$(js "$TODO")" "$CODE"
+  else echo "à faire : $TODO"; fi
+  exit $CODE
+fi
+if [ "$YES" = 0 ]; then
+  printf 'À faire : %s. Continuer ? [o/N] ' "$TODO"; read -r a || a=
+  case $a in [oOyY]*) ;; *) echo "abandon, rien n'a été modifié"; exit 0 ;; esac
+fi
+
+command -v git >/dev/null 2>&1 || fail "git absent sur cette machine" 6
+lock
+# Restes d'une pose interrompue (on tient le verrou : ils ne sont à personne), sauf le clone fourni
+for d in "$DIR".tmp.*; do [ -d "$d" ] && [ "$d" != "$CLONE" ] && rm -rf "$d"; done
+detect                                     # l'état a pu changer avant l'obtention du verrou
+
+same_repo() {  # l'origine du clone $1 est-elle ce dépôt (https ou ssh, avec ou sans .git) ?
+  o=$(G -C "$1" remote get-url origin 2>/dev/null); o=${o%.git}; w=${REPO_URL%.git}
+  [ "${o##*github.com[:/]}" = "${w##*github.com[:/]}" ]
+}
+
+if [ "$KIND" = git ]; then
+  [ -n "$CLONE" ] && { rm -rf "$CLONE"; CLONE=; }     # déjà installé : le clone fourni ne sert pas
+  [ "$DIRTY" = 1 ] && fail "fichiers suivis modifiés dans $DIR : rien n'a été touché (git status)" 1
+  BEFORE=$COMMIT
+  say "git fetch"
+  G -C "$DIR" fetch -q origin "$BRANCH" >&2 2>&1 || fail "réseau ou dépôt inaccessible (git fetch) — rien n'a été modifié" 6
+  G -C "$DIR" merge -q --ff-only "origin/$BRANCH" >&2 2>&1 || fail "impossible d'avancer sur origin/$BRANCH (historique divergent ?)" 1
+  say "à jour : $BEFORE → $(G -C "$DIR" rev-parse --short HEAD)"
+  ACTION=update
+else
+  if [ -n "$CLONE" ]; then
+    [ -f "$CLONE/lib/dotlib.sh" ] && [ -d "$CLONE/.git" ] && same_repo "$CLONE" \
+      || fail "$CLONE n'est pas un clone de $REPO_URL : refusé" 1
+    [ "$(G -C "$CLONE" rev-parse --is-shallow-repository 2>/dev/null)" = true ] && fail "$CLONE est un clone superficiel : refusé" 1
+    TMPD=$CLONE
+  else
+    TMPD="$DIR.tmp.$$"
+    say "git clone $REPO_URL ($BRANCH)"
+    G clone -q --branch "$BRANCH" "$REPO_URL" "$TMPD" >&2 2>&1 || { rm -rf "$TMPD"; fail "réseau ou dépôt inaccessible (git clone) — rien n'a été modifié" 6; }
+  fi
+  PREV=
+  if [ -e "$DIR" ]; then
+    PREV="$DIR.previous-$STAMP"
+    mv "$DIR" "$PREV" || fail "impossible de mettre $DIR de côté"
+    [ -d "$PREV/local" ] && mv "$PREV/local" "$TMPD/local"
+  fi
+  mv "$TMPD" "$DIR" || { [ -n "$PREV" ] && mv "$PREV" "$DIR"; fail "impossible de mettre en place $DIR (rien n'a changé)"; }
+  CLONE=
+  [ -n "$PREV" ] && rm -rf "$PREV"
+  case $KIND in absent) ACTION=install ;; *) ACTION=replace ;; esac
+fi
+
+mkdir -p "$DIR/local"
+printf 'posed_by=%s\ndate=%s\ncommit=%s\n' "$POSED_BY" "$STAMP" "$(G -C "$DIR" rev-parse --short HEAD 2>/dev/null)" > "$DIR/local/.pose"
+finish "$ACTION"

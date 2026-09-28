@@ -1,0 +1,5 @@
+#!/bin/sh
+# bin/hooks/pre-push — avant toute poussée : tests (contrat, et anti-fuite s'il existe). Un échec bloque.
+# Installé par « make hooks ». Ne remplace pas la relecture : il ne protège que la machine où il est posé.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+for t in test/*.sh; do sh "$t" >/dev/null 2>&1 || { echo "pre-push : $t échoue — poussée refusée (sh $t)" >&2; exit 1; }; done
