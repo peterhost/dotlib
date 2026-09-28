@@ -140,6 +140,13 @@ print("CODE=%d" % onglets.lancer([onglets.Onglet("T", lambda: ["x"])], "essai"))
 case $out in *CODE=4*) ok "TERM=dumb : refus propre (code 4), l'appelant affiche son texte" ;;
              *) ko "TERM=dumb" "$out" ;; esac
 
+# 9 ter. Le volet actif au démarrage est la LISTE : on entre par elle, on choisit, puis on entre
+# dans la section. Démarrer sur le contenu obligeait à penser à Tab pour atteindre la liste.
+out=$(cd "$TMP" && $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets; print(onglets.Onglet("T", lambda: [], genre="raccourcis").focus)' 2>&1)
+[ "$out" = "gauche" ] && ok "au démarrage, c'est la liste des sections qui a le focus" || ko "focus initial" "$out"
+
 # 10. LE CONTRAT ET LE CODE DISENT-ILS LA MÊME CHOSE ? API.md a documenté « API_COMPATIBLES »
 # pendant que le code ne l'avait pas : un appelant qui suit la documentation lit un attribut
 # inexistant et dégrade EN SILENCE. Ce test ferme la classe entière du défaut : tout nom

@@ -196,7 +196,9 @@ class Onglet:
         self.action = action
         self.contenu = None
         self.total_ecran = 0            # lignes d'écran du dernier rendu (pages, G, compteur)
-        self.focus = "droite"           # deux volets : « gauche » (la liste) ou « droite » (le contenu)
+        # On entre par la LISTE, on choisit une section, puis on entre dedans : c'est l'ordre naturel
+        # de l'usage. Démarrer sur le contenu obligeait à penser à Tab pour atteindre la liste.
+        self.focus = "gauche"           # deux volets : « gauche » (la liste) ou « droite » (le contenu)
         self.colonne = 0                # abscisse du séparateur, publiée par le rendu (souris)
         self.hauteur = 1                # hauteur visible, publiée par le rendu (pages)
         self.debut_noms = 0             # première section affichée à gauche (clic)
