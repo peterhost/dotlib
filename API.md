@@ -104,11 +104,11 @@ testent — l'un d'eux n'a aucune copie de repli.
 
 ### Ce qui est garanti
 
-- `lancer(onglets, nom="")` → `0` à la sortie ; `4` si l'entrée ou la sortie n'est pas un terminal,
+- `onglets.lancer(onglets, nom="")` → `0` à la sortie ; `4` si l'entrée ou la sortie n'est pas un terminal,
   ou si curses ne démarre pas, avec une ligne « `nom` : … » sur la sortie d'erreur (l'appelant
   affiche alors son contenu à la suite). Jamais d'exception de terminal ; le terminal est toujours
   rendu, y compris si un onglet lève.
-- `Onglet(titre, produire, genre="texte")` — `produire` est un appelable sans argument, appelé à la
+- `onglets.Onglet(titre, produire, genre="texte")` — `produire` est un appelable sans argument, appelé à la
   PREMIÈRE ouverture de l'onglet et gardé (`r` recharge). Une exception d'un producteur n'emporte
   pas l'interface : l'onglet affiche « illisible ».
   - `genre="texte"` : `produire()` → liste de lignes ;
@@ -117,18 +117,18 @@ testent — l'un d'eux n'a aucune copie de repli.
     les autres à la suite. **Les colonnes au-delà de la cinquième sont ignorées** : n'en ajoutez pas
     une sixième en comptant qu'elle arrive. L'ordre des thèmes est une DONNÉE que vous fournissez ;
     le module ne le calcule ni ne le devine jamais.
-- `sortie(commande, cwd=None, env=None, delai=60)` → lignes sans couleurs ni séquences d'échappement.
+- `onglets.sortie(commande, cwd=None, env=None, delai=60)` → lignes sans couleurs ni séquences d'échappement.
   `NO_COLOR=1`, **le vrai `TERM` est conservé** (un `TERM=dumb` change ce que certains programmes
   annoncent : vim y déduit un terminal sans couleurs et rapporte un autre thème que le sien).
   L'entrée est FERMÉE (sans quoi une commande qui lit son entrée fige l'interface). Jamais
   d'exception : commande absente, droit refusé, trop longue → une ligne entre parenthèses.
   **Le délai de 60 s ne suffit pas à un producteur qui lance un autre programme** : un état qui
   démarre vim deux fois et teste un accès réseau dépasse la minute sur un NAS. Relevez `delai=`.
-- `utf8()` → booléen, sans curses, testable seul. Décide d'après l'ENVIRONNEMENT
+- `onglets.utf8()` → booléen, sans curses, testable seul. Décide d'après l'ENVIRONNEMENT
   (`LC_ALL`, sinon `LC_CTYPE`, sinon `LANG`, contient « utf…8 »), et `TERM=linux` → faux d'office.
   Ne jamais utiliser `locale.getpreferredencoding()` : depuis Python 3.7 il rend `utf-8` même sous
   `LC_ALL=C` (PEP 538/540), donc tout repli ASCII fondé sur lui est du code mort.
-- `ordonner(presents, reference)` → les présents dans l'ordre de référence, les autres à la suite.
+- `onglets.ordonner(presents, reference)` → les présents dans l'ordre de référence, les autres à la suite.
 
 ### Mise en forme des lignes (genre « texte »)
 

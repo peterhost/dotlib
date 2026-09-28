@@ -130,5 +130,55 @@ print(onglets.sortie(["sh", "-c", "printf \"\\033[31mrouge\\033[0m\\n\""]))' 2>&
 (commande absente
 ['rouge']" ] && ok "sortie() : délai maximal, entrée fermée (cat ne bloque pas), commande absente, couleurs retirées" || ko "sortie()" "$out"
 
+# 10. LE CONTRAT ET LE CODE DISENT-ILS LA MÊME CHOSE ? API.md a documenté « API_COMPATIBLES »
+# pendant que le code ne l'avait pas : un appelant qui suit la documentation lit un attribut
+# inexistant et dégrade EN SILENCE. Ce test ferme la classe entière du défaut : tout nom
+# « onglets.X » cité dans API.md doit exister dans le module.
+out=$(cd "$TMP" && $PY -c '
+import re, sys
+sys.dont_write_bytecode = True; sys.path.insert(0, ".")
+import onglets
+doc = open(sys.argv[1], encoding="utf-8").read()
+noms = sorted(set(re.findall(r"`onglets\.([A-Za-z_][A-Za-z_0-9]*)", doc)))
+manquants = [n for n in noms if not hasattr(onglets, n)]
+print("%d cités, manquants : %s" % (len(noms), manquants or "aucun"))' "$ROOT/API.md" 2>&1)
+case $out in *"manquants : aucun"*) ok "tout nom documenté existe dans le module ($out)" ;; *) ko "contrat ≠ code" "$out" ;; esac
+
+# 11. Les quatre cas de utf8(), dont celui d'une connexion ssh depuis macOS (LC_CTYPE sans LANG) :
+# le module ne doit pas contredire lib/tui.sh de ce même dépôt.
+cas() {  # description ; environnement ; attendu
+  r=$(env -u LC_ALL -u LC_CTYPE -u LANG $2 $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,"'"$ROOT"'/lib")
+import onglets; print(onglets.utf8())' 2>&1)
+  [ "$r" = "$3" ] && ok "utf8() : $1 → $3" || ko "utf8() : $1" "attendu $3, obtenu $r"
+}
+cas "LANG=C (un NAS)"                       "LANG=C"                  False
+cas "LC_CTYPE=C.UTF-8 (coercition CPython)" "LC_CTYPE=C.UTF-8"        False
+cas "LC_CTYPE=UTF-8 sans LANG (ssh macOS)"  "LC_CTYPE=UTF-8"          True
+cas "LC_CTYPE=UTF-8 avec LANG=C"            "LC_CTYPE=UTF-8 LANG=C"   False
+cas "console Linux"                         "TERM=linux LANG=fr_FR.UTF-8" False
+
+# 12. Les flèches sont des NOMS DE TOUCHES : « ,? » ne dit pas quoi taper.
+out=$(cd "$TMP" && $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets
+print(onglets.ascii_lisible("\u2191 / \u2193 / ,\u2190 / Alt-\u2192"))
+print(onglets.ascii_lisible("\u00a7"))' 2>&1)
+[ "$out" = "haut / bas / ,gauche / Alt-droite
+[?]" ] && ok "translittération : flèches en mots, non représentable avoué entre crochets" || ko "flèches" "$out"
+
+# 13. lancer() ne lève JAMAIS : l'appelant n'a aucune copie de repli, une trace python lui arriverait
+# à l'écran. On casse volontairement hors du rendu d'un onglet (barre()).
+out=$(cd "$TMP" && printf 'q' | script -q /dev/null $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets
+class Mauvais:
+    def __bool__(self): return True
+    def __len__(self): raise RuntimeError("nom biscornu")
+print("CODE=%d" % onglets.lancer([onglets.Onglet("T", lambda: ["x"])], Mauvais()))' 2>&1 | tr -d "\r")
+case $out in *Traceback*) ko "lancer() laisse échapper une exception" "$out" ;;
+             *CODE=4*)    ok "lancer() ne lève jamais : défaut hors onglet → code 4, pas de trace" ;;
+             *)           ko "lancer() : ni trace ni code 4" "$out" ;; esac
+
 printf '\n%s%d réussis%s, %d échecs\n' "$G" "$PASS" "$N" "$FAIL"
 [ $FAIL -eq 0 ]

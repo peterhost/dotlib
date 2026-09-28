@@ -30,6 +30,9 @@ import sys
 import unicodedata
 
 API = 1
+# Les versions que ce module sert ENCORE. Un appelant sans copie de repli lit ceci pour savoir s'il
+# peut s'en servir ; quand API passera à 2, la 1 y restera le temps qu'il adapte et teste.
+API_COMPATIBLES = (1,)
 
 SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 AIDE = "←→/Tab onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
@@ -47,10 +50,16 @@ def utf8():
     if os.environ.get("TERM", "") == "linux":          # console Linux : pas de semi-graphique
         return False
     ctype = os.environ.get("LC_CTYPE", "")
-    # PEP 538 : quand la locale vaut C ou POSIX, CPython RÉÉCRIT LC_CTYPE en « C.UTF-8 » dans son
-    # propre environnement, avant que ce code ne tourne. Lire l'environnement ne suffit donc pas :
-    # il faut défaire cette réécriture, sinon on croit à de l'UTF-8 là où le shell, lui, répond non.
-    if ctype in ("C.UTF-8", "C.utf8", "UTF-8") and os.environ.get("LANG", "").upper() in ("", "C", "POSIX"):
+    lang = os.environ.get("LANG", "").upper()
+    # PEP 538 : quand la locale vaut C ou POSIX, CPython RÉÉCRIT LC_CTYPE dans son propre
+    # environnement avant que ce code ne tourne. Lire l'environnement ne suffit donc pas — mais le
+    # remède doit être étroit, sinon il attrape un cas légitime :
+    #   « C.UTF-8 » / « C.utf8 » : personne ne pose cette valeur à la main, c'est la coercition ;
+    #   « UTF-8 » nu : c'est AUSSI ce que macOS et ssh transmettent pour de vrai (LC_CTYPE sans
+    #   LANG). On ne le tient pour une réécriture que si LANG dit explicitement C ou POSIX.
+    if ctype in ("C.UTF-8", "C.utf8"):
+        return False
+    if ctype == "UTF-8" and lang in ("C", "POSIX"):
         return False
     lang = os.environ.get("LC_ALL") or ctype or os.environ.get("LANG") or ""
     return "utf8" in lang.lower().replace("-", "")
@@ -61,11 +70,17 @@ def ascii_lisible(texte):
     sur les machines où la dégradation sert, cinq thèmes sur vingt devenaient illisibles."""
     for typo, plat in (("\u2019", "'"), ("\u2018", "'"), ("\u201c", '"'), ("\u201d", '"'),
                        ("\u00ab", '"'), ("\u00bb", '"'), ("\u00b7", "-"), ("\u2014", "-"),
-                       ("\u2013", "-"), ("\u2026", "..."), ("\u00a0", " ")):
-        texte = texte.replace(typo, plat)      # ponctuation typographique : des mots, pas des « ? »
+                       ("\u2013", "-"), ("\u2026", "..."), ("\u00a0", " "),
+                       # Les flèches sont des NOMS DE TOUCHES, pas de la décoration : « ,? » ne dit
+                       # pas quoi taper. Des mots, et non « ^ v < > » qui se confondraient avec de
+                       # vraies touches (« ,< » et « ,> » existent).
+                       ("\u2191", "haut"), ("\u2193", "bas"), ("\u2190", "gauche"), ("\u2192", "droite")):
+        texte = texte.replace(typo, plat)
     plat = unicodedata.normalize("NFD", texte)
     plat = "".join(c for c in plat if not unicodedata.combining(c))
-    return plat.encode("ascii", "replace").decode("ascii")
+    # Ce qui reste n'est pas représentable : on l'AVOUE entre crochets. Un « ? » nu se lirait comme
+    # la touche « ? », ce qui est pire que de ne rien dire — au milieu d'une liste de touches surtout.
+    return "".join(c if ord(c) < 127 else "[?]" for c in plat)
 
 
 def sortie(commande, cwd=None, env=None, delai=60):
@@ -136,6 +151,7 @@ class Interface:
         self.saisie = False
         self.message = ""
         self.paires = {}
+        self.position = ""              # « 12/86 », écrit par pied() dans son filet
         self.utf8 = utf8()
         self.h_trait, self.v_trait = ("─", "│") if self.utf8 else ("-", "|")
 
@@ -202,6 +218,8 @@ class Interface:
     def pied(self):
         h, l = self.ecran.getmaxyx()
         self.ecrire(h - 2, 0, self.h_trait * (l - 1), self.attr("portee"))
+        if self.position:                        # après le filet, donc visible
+            self.ecrire(h - 2, max(0, l - len(self.position) - 2), self.position, self.attr("portee"))
         aide = AIDE if self.utf8 else AIDE_ASCII
         o = self.onglets[self.actif]
         if o.genre == "groupes" and o.action:
@@ -222,11 +240,12 @@ class Interface:
         return [t for t in textes if f in t.lower()]
 
     def compteur(self, haut, hauteur, largeur, debut, total):
-        # sous le contenu, pas par-dessus : écrire sur la dernière ligne effaçait la fin d'une ligne
-        # longue, précisément quand il y a beaucoup à lire
-        if total > hauteur:
-            texte = " %d/%d " % (min(debut + hauteur, total), total)
-            self.ecrire(haut + hauteur, max(0, largeur - len(texte) - 2), texte, self.attr("portee"))
+        """Mémorise « 12/86 » ; c'est pied() qui l'écrira, DANS son filet.
+
+        Écrit ici, il était soit par-dessus la dernière ligne de contenu (et en effaçait la fin,
+        précisément quand il y a beaucoup à lire), soit sur la ligne du filet — que pied() redessine
+        juste après, ce qui le rendait invisible. Le filet est déjà une zone d'information."""
+        self.position = " %d/%d " % (min(debut + hauteur, total), total) if total > hauteur else ''
 
     def colonne_gauche(self, o, noms, comptes, haut, hauteur):
         o.rang = max(0, min(o.rang, len(noms) - 1))
@@ -324,6 +343,7 @@ class Interface:
             self.ecran.refresh()
             return
         self.barre()
+        self.position = ""              # un onglet qui tient à l'écran n'hérite pas du compteur du précédent
         haut, hauteur = 2, max(1, h - 4)
         o = self.onglets[self.actif]
         if o.contenu is None:
@@ -475,5 +495,11 @@ def lancer(onglets, nom=""):
         curses.wrapper(demarrer)
     except curses.error as e:
         print("%s : terminal trop limité pour l'interface (%s)" % (nom or "interface", e), file=sys.stderr)
+        return 4
+    except Exception as e:                       # noqa: BLE001
+        # « lancer() ne lève jamais » sans réserve. Tout ce qui n'est pas le rendu d'un onglet
+        # (barre, pied, colonne de gauche, un défaut à venir de ce module) remonterait sinon chez
+        # l'appelant, qui n'a aucun repli et afficherait une trace python à l'utilisateur.
+        print("%s : interface interrompue (%s: %s)" % (nom or "interface", type(e).__name__, e), file=sys.stderr)
         return 4
     return 0
