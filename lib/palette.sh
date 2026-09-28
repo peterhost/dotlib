@@ -3,7 +3,8 @@
 # bash 3.2+, aucun processus lancé (sauf « defaults » sur macOS en thème auto, une fois : le
 # résultat est exporté). Réglage de l'utilisateur : $DOTLIB_DIR/local/theme.conf (dotlib_theme_set),
 # lignes CLÉ=valeur ; une variable d'environnement du même nom l'emporte.
-#   DOTLIB_PALETTE  catppuccin (défaut) | gruvbox | nord | solarized | tokyonight | xterm
+#   DOTLIB_PALETTE  catppuccin (défaut) | gruvbox | nord | solarized | tokyonight | everforest | edge |
+#                   lucius | papercolor | pencil | xterm
 #                   (xterm : palette 256 couleurs historique ; « actuel », son ancien nom, reste accepté)
 #   DOTLIB_THEME    auto (défaut) | dark | light
 #                   auto : COLORFGBG, sinon LC_DOTLIB_THEME (transmis par ssh), sinon apparence macOS,
@@ -20,7 +21,7 @@
 # Voir API.md pour ce qui est garanti.
 
 : "${DOTLIB_DIR:=$HOME/.dotlib}"
-DOTLIB_PALETTES='catppuccin gruvbox nord solarized tokyonight xterm'
+DOTLIB_PALETTES='catppuccin gruvbox nord solarized tokyonight everforest edge lucius papercolor pencil xterm'
 
 # _dotlib_depth : DOTLIB_COLORS d'après l'environnement, si l'appelant ne l'a pas fixé
 _dotlib_depth() {
@@ -87,6 +88,16 @@ _dotlib_palette_data() {
     solarized:light) _p='d33682/168 268bd2/32 657b83/66 fdf6e3/230 b58900/136 2aa198/36 93a1a1/247 dc322f/166 cb4b16/166' ;;
     tokyonight:dark) _p='bb9af7/141 7aa2f7/111 a9b1d6/146 c0caf5/153 3d59a1/61 7dcfff/117 565f89/60 f7768e/210 ff9e64/215' ;;
     tokyonight:light) _p='9854f1/99 2e7de9/32 6172b0/61 e1e2e7/254 8c6c3e/95 007197/24 848cb5/103 f52a65/197 b15c00/130' ;;
+    everforest:dark) _p='d699b6/175 7fbbb3/109 9da9a0/248 2d353b/237 a7c080/144 83c092/108 859289/245 e67e80/174 e69875/174' ;;
+    everforest:light) _p='df69ba/169 3a94c5/68 829181/102 fdf6e3/230 8da101/106 35a77c/72 939f91/246 f85552/203 f57d26/208' ;;
+    edge:dark) _p='d38aea/176 6cb6eb/74 a0a8b7/248 2c2e34/236 a0c980/150 5dbbc1/73 7f8490/102 ec7279/204 deb974/180' ;;
+    edge:light) _p='b05ccc/134 5079be/67 6c7483/243 fafafa/231 608e32/65 3a8b84/66 8790a0/246 d05858/167 be7e05/136' ;;
+    lucius:dark) _p='d7afd7/182 87afd7/110 bcbcbc/250 303030/236 d7d7af/187 87d7d7/116 808080/244 d78787/174 d7af87/180' ;;
+    lucius:light) _p='870087/90 005faf/25 585858/240 eeeeee/255 af8700/136 008787/30 808080/244 af0000/124 af5f00/130' ;;
+    papercolor:dark) _p='af87d7/140 5fafd7/74 bcbcbc/250 1c1c1c/234 d7af5f/179 00afaf/37 808080/244 df0000/160 ff8700/208' ;;
+    papercolor:light) _p='8700af/91 0087af/31 585858/240 eeeeee/255 d75f00/166 005f87/24 878787/102 af0000/124 d75f00/166' ;;
+    pencil:dark) _p='6855de/62 20bbfc/39 b2b2b2/249 212121/234 f3e430/221 4fb8cc/74 6c6c6c/242 e32791/162 f3e430/221' ;;
+    pencil:light) _p='523c79/60 008ec4/32 626262/241 f1f1f1/255 a89c14/142 20a5ba/37 9e9e9e/247 c30771/125 a89c14/142' ;;
     *) return 1 ;;
   esac
 }
@@ -170,6 +181,16 @@ _dotlib_pill_base() {   # fond neutre / texte / « creux » (texte sur la couleu
     solarized:light)  _pb='eee8d5/254 586e75/242 fdf6e3/230' ;;
     tokyonight:dark)  _pb='292e42/236 c0caf5/153 16161e/233' ;;
     tokyonight:light) _pb='c4c8da/252 3760bf/25 e9e9ec/255' ;;
+    everforest:dark) _pb='3d484d/238 d3c6aa/187 232a2e/235' ;;
+    everforest:light) _pb='e6e2cc/253 5c6a72/242 f4f0d9/230' ;;
+    edge:dark) _pb='3b3e48/238 c5cdd9/252 222327/235' ;;
+    edge:light) _pb='dde2e7/254 4b505b/239 eef1f4/255' ;;
+    lucius:dark) _pb='444444/238 d7d7d7/188 262626/235' ;;
+    lucius:light) _pb='dadada/253 444444/238 e4e4e4/254' ;;
+    papercolor:dark) _pb='3a3a3a/237 d0d0d0/252 121212/233' ;;
+    papercolor:light) _pb='d0d0d0/252 444444/238 e4e4e4/254' ;;
+    pencil:dark) _pb='303030/236 f1f1f1/255 1c1c1c/234' ;;
+    pencil:light) _pb='d9d9d9/253 424242/238 e5e5e5/254' ;;
     xterm:light)      _pb='d0d0d0/252 303030/236 eeeeee/255' ;;
     *)                _pb='3a3a3a/237 d0d0d0/252 121212/233' ;;
   esac

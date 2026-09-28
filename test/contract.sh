@@ -39,9 +39,8 @@ for b in /bin/bash /opt/homebrew/bin/bash /usr/bin/bash /usr/local/bin/bash /opt
   case $out in *38\;2\;*) ok "bash $v · COLORTERM=truecolor : vraies couleurs" ;; *) ko "bash $v · truecolor" "$out" ;; esac
   out=$(b_ "$b" linux 'dotlib_palette_load; echo "$DOTLIB_COLORS $DOTLIB_THEME_EFF"')
   [ "$out" = "8 dark" ] && ok "bash $v · console linux : 8 couleurs" || ko "bash $v · console" "$out"
-  out=$(b_ "$b" xterm-256color 'dotlib_palette_load; for p in $DOTLIB_PALETTES; do DOTLIB_PALETTE=$p; dotlib_palette_load; echo "$p=$DOTLIB_PALETTE_EFF"; done | tr "\n" " "')
-  [ "$out" = "catppuccin=catppuccin gruvbox=gruvbox nord=nord solarized=solarized tokyonight=tokyonight xterm=xterm " ] \
-    && ok "bash $v · les 6 palettes se chargent" || ko "bash $v · palettes" "$out"
+  out=$(b_ "$b" xterm-256color 'dotlib_palette_load; for p in $DOTLIB_PALETTES; do for t in dark light; do DOTLIB_PALETTE=$p DOTLIB_THEME=$t; dotlib_palette_load; [ "$DOTLIB_PALETTE_EFF" = $p ] && [ -n "$C_R_NUM" ] && [ -n "$C_R_MATCH" ] || echo "KO $p $t"; dotlib_pill BAD x t; [ -n "$DOTLIB_PILL" ] || echo "pastille $p $t"; done; done; set -- $DOTLIB_PALETTES; echo "n=$#"')
+  [ "$out" = "n=11" ] && ok "bash $v · les 11 palettes se chargent, en sombre et en clair (rôles et pastille)" || ko "bash $v · palettes" "$out"
   out=$(b_ "$b" xterm-256color 'DOTLIB_PALETTE=actuel; dotlib_palette_load; echo $DOTLIB_PALETTE_EFF')
   [ "$out" = xterm ] && ok "bash $v · « actuel » accepté comme ancien nom de xterm" || ko "bash $v · actuel" "$out"
   out=$(b_ "$b" xterm-256color 'dotlib_palette_load; dotlib_pill BAD "!" "texte"; printf "%s" "$DOTLIB_PILL"')

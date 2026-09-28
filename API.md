@@ -42,7 +42,7 @@ Réglage de l'utilisateur, commun à tous les outils : `$DOTLIB_DIR/local/theme.
 
 | Clé | Valeurs | Défaut |
 |---|---|---|
-| `DOTLIB_PALETTE` | `catppuccin` `gruvbox` `nord` `solarized` `tokyonight` `xterm` (`actuel` : ancien nom de `xterm`, accepté en lecture) | `catppuccin` |
+| `DOTLIB_PALETTE` | `catppuccin` `gruvbox` `nord` `solarized` `tokyonight` `everforest` `edge` `lucius` `papercolor` `pencil` `xterm` (`actuel` : ancien nom de `xterm`, accepté en lecture) | `catppuccin` |
 | `DOTLIB_THEME` | `auto` `dark` `light` | `auto` |
 | `DOTLIB_MATCH` | `fond` `texte` (surlignage des correspondances) | `fond` |
 
