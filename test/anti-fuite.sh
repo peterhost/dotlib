@@ -95,6 +95,32 @@ trouve=$([ -z "$DONNES" ] && git log --format='%ae%n%ce' | sort -u | grep -vE '@
 [ -n "$trouve" ] && signaler "adresse non-noreply dans l'historique (auteur ou validateur) :
 $trouve"
 
+# ---------------------------------------------------------------- 2 bis. messages des commits
+# Une fuite ne sort pas que par le CONTENU : elle sort aussi par les messages. On vérifie ceux qui
+# ne sont pas encore poussés, où un « commit --amend » répare encore tout ; au-delà, c'est publié.
+# (Incident réel dans un dépôt voisin : un nom de machine écrit dans le message qui validait la
+# correction d'un nom de machine. Le contrôle du contenu l'avait attrapé, pas celui des messages.)
+if [ -z "$DONNES" ]; then
+  base=$(git rev-parse --verify -q origin/main 2>/dev/null)
+  messages=$([ -n "$base" ] && git log --format='%h %B' "$base"..HEAD 2>/dev/null)
+  if [ -n "$messages" ]; then
+    t=$(printf '%s\n' "$messages" | grep -nE '(/Users/|/home/|/var/services/homes/)[a-z]|([0-9]{1,3}\.){3}[0-9]{1,3}')
+    [ -n "$t" ] && signaler "message de commit non poussé : chemin ou adresse
+$t"
+    LISTE_M=${DOTLIB_MOTS_INTERDITS:-$HOME/.dotlib/local/mots-interdits}
+    if [ -r "$LISTE_M" ]; then
+      while IFS= read -r ligne; do
+        case "$ligne" in ''|'#'*) continue ;; esac
+        mot=${ligne%%!*}; mot=$(printf '%s' "$mot" | tr -d ' \t')
+        [ -n "$mot" ] || continue
+        t=$(printf '%s\n' "$messages" | grep -niF -- "$mot")
+        [ -n "$t" ] && signaler "message de commit non poussé : mot interdit « $mot »
+$t"
+      done < "$LISTE_M"
+    fi
+  fi
+fi
+
 # ---------------------------------------------------------------- 3. littéraux interdits (hors dépôt)
 LISTE=${DOTLIB_MOTS_INTERDITS:-$HOME/.dotlib/local/mots-interdits}
 if [ -r "$LISTE" ]; then

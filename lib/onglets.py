@@ -301,17 +301,21 @@ class Interface:
 
     def barre(self):
         h, l = self.ecran.getmaxyx()
+        etiquettes = [" %d %s " % (i + 1, o.titre) for i, o in enumerate(self.onglets)]
+        besoin = sum(len(e) + 1 for e in etiquettes) + 1
+        # Le nom de l'appelant est ACCESSOIRE, les onglets ne le sont pas : quand tout ne tient pas,
+        # c'est le nom qui cède la place, et le repère de débordement ne vient plus s'y coller.
+        avec_nom = bool(self.nom) and besoin + len(self.nom) + 2 <= l
+        place = l - (len(self.nom) + 3) if avec_nom else l - 1
         x = 1
-        place = l - (len(self.nom) + 3 if self.nom else 1)
-        for i, o in enumerate(self.onglets):
-            etiquette = " %d %s " % (i + 1, o.titre)
+        for i, etiquette in enumerate(etiquettes):
             if x + len(etiquette) > place:      # débordement : on le DIT, au lieu d'escamoter la fin
                 self.ecrire(0, min(x, place - 1), "\u203a" if self.utf8 else ">", self.attr("mauvais"))
                 break
             attr = curses.A_REVERSE | curses.A_BOLD if i == self.actif else self.attr("onglet")
             self.ecrire(0, x, etiquette, attr)
             x += len(etiquette) + 1
-        if self.nom:
+        if avec_nom:
             self.ecrire(0, max(x + 1, l - len(self.nom) - 2), self.nom, self.attr("portee"))
         self.ecrire(1, 0, self.h_trait * (l - 1), self.attr("portee"))
 
