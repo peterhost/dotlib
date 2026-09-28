@@ -87,23 +87,90 @@ il se règle en une commande, que le message donne.
 
 ## Interface à onglets (`lib/onglets.py`, Python ≥ 3.8)
 
-`onglets.API = 1` (entier, même règle d'évolution). Rien à l'import : ni terminal, ni processus, ni fichier.
-L'appelant pose `sys.dont_write_bytecode = True` avant l'import (aucun `__pycache__` dans `~/.dotlib`).
+Socle commun de `brc interface` et `vrc interface`. Rien à l'import : ni terminal, ni processus, ni
+fichier. L'appelant pose `sys.dont_write_bytecode = True` avant d'importer (aucun `__pycache__` dans
+`~/.dotlib` : un `.pyc` porte le chemin absolu de son source, donc un nom de compte).
 
-- `lancer(onglets, nom="")` → `0` à la sortie ; `4` sans terminal ou si curses ne démarre pas, avec une ligne
-  « `nom` : … » sur la sortie d'erreur (l'appelant affiche alors son contenu à la suite). Jamais d'exception de
-  terminal ; le terminal est toujours rendu.
-- `Onglet(titre, produire, genre="texte", action=None)` — `produire` est un appelable sans argument, appelé à la
-  première ouverture de l'onglet, résultat gardé (`r` recharge). `liste=True` : ancien nom de `genre="raccourcis"`.
-  - `texte` : `produire()` → liste de lignes (une ligne commençant par `==` est un titre, `✓` / `✗` / `!` un état) ;
-  - `raccourcis` : `produire()` → `{"entrees": [[source, thème, touches, description, portée], …], "themes": [ordre]}` ;
-    les thèmes présents sont rangés selon `themes`, les autres à la suite ;
-  - `groupes` : `produire()` → `[(nom, [lignes]), …]` ; `action(nom)` facultative, appelée par Entrée, renvoie un
-    message ; l'onglet est ensuite rechargé.
-- `sortie(commande, cwd=None, env=None, delai=60)` → lignes sans couleurs ; `NO_COLOR=1`, `TERM` réel conservé,
-  entrée fermée, délai maximal ; jamais d'exception (commande absente, trop longue : une ligne entre parenthèses).
-- `lire_tsv(lignes, colonnes=5)`, `ordonner(presents, reference)` : aides.
+### Version, et pourquoi il n'y aura pas de rupture sèche
 
-Touches : ←→ Tab Maj-Tab `1`…`9` (onglets), ↑↓ `j` `k`, PgUp PgDn Espace, `g` `G`, `/` filtre (Échap l'efface),
-Entrée (action), `r` recharger, `q` quitter. Dégradation garantie et testée : sans couleurs (monochrome), locale
-non UTF-8 (cadres ASCII), fenêtre plus petite que 40×10 (message), entrée fermée (sortie après 20 échecs).
+`onglets.API` — entier, vaut `1`.
+`onglets.API_COMPATIBLES` — tuple des versions que ce module sert encore, vaut `(1,)`.
+
+Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
+**Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
+trouve rien et dégrade EN SILENCE, ce qui ne se voit qu'une fois déployé sur toutes les machines.
+Quand l'API passera à 2, la 1 restera dans `API_COMPATIBLES` le temps que les appelants adaptent et
+testent — l'un d'eux n'a aucune copie de repli.
+
+### Ce qui est garanti
+
+- `lancer(onglets, nom="")` → `0` à la sortie ; `4` si l'entrée ou la sortie n'est pas un terminal,
+  ou si curses ne démarre pas, avec une ligne « `nom` : … » sur la sortie d'erreur (l'appelant
+  affiche alors son contenu à la suite). Jamais d'exception de terminal ; le terminal est toujours
+  rendu, y compris si un onglet lève.
+- `Onglet(titre, produire, genre="texte")` — `produire` est un appelable sans argument, appelé à la
+  PREMIÈRE ouverture de l'onglet et gardé (`r` recharge). Une exception d'un producteur n'emporte
+  pas l'interface : l'onglet affiche « illisible ».
+  - `genre="texte"` : `produire()` → liste de lignes ;
+  - `genre="raccourcis"` : `produire()` → `{"entrees": [[source, thème, touches, description,
+    portée], …], "themes": [ordre de référence]}`. Les thèmes présents sont rangés selon `themes`,
+    les autres à la suite. **Les colonnes au-delà de la cinquième sont ignorées** : n'en ajoutez pas
+    une sixième en comptant qu'elle arrive. L'ordre des thèmes est une DONNÉE que vous fournissez ;
+    le module ne le calcule ni ne le devine jamais.
+- `sortie(commande, cwd=None, env=None, delai=60)` → lignes sans couleurs ni séquences d'échappement.
+  `NO_COLOR=1`, **le vrai `TERM` est conservé** (un `TERM=dumb` change ce que certains programmes
+  annoncent : vim y déduit un terminal sans couleurs et rapporte un autre thème que le sien).
+  L'entrée est FERMÉE (sans quoi une commande qui lit son entrée fige l'interface). Jamais
+  d'exception : commande absente, droit refusé, trop longue → une ligne entre parenthèses.
+  **Le délai de 60 s ne suffit pas à un producteur qui lance un autre programme** : un état qui
+  démarre vim deux fois et teste un accès réseau dépasse la minute sur un NAS. Relevez `delai=`.
+- `utf8()` → booléen, sans curses, testable seul. Décide d'après l'ENVIRONNEMENT
+  (`LC_ALL`, sinon `LC_CTYPE`, sinon `LANG`, contient « utf…8 »), et `TERM=linux` → faux d'office.
+  Ne jamais utiliser `locale.getpreferredencoding()` : depuis Python 3.7 il rend `utf-8` même sous
+  `LC_ALL=C` (PEP 538/540), donc tout repli ASCII fondé sur lui est du code mort.
+- `ordonner(presents, reference)` → les présents dans l'ordre de référence, les autres à la suite.
+
+### Mise en forme des lignes (genre « texte »)
+
+Quatre repères, en tête de ligne, et pas un de plus :
+
+| repère | sens | forme ASCII |
+|---|---|---|
+| `==` | titre de section | `==` |
+| `✓` | bon | `+` |
+| `✗` | mauvais | `x` |
+| `!` | avertissement | `!` |
+
+### Dégradation — garantie et testée
+
+Sans couleurs (`has_colors()` faux, `COLORS < 8`, `COLOR_PAIRS` insuffisant : c'est le cas d'un NAS
+sous DSM, qui rapporte `COLORS=0` malgré des terminfo présents) → monochrome lisible, repères en
+gras. Locale non UTF-8 → cadres ASCII et textes **translittérés** (`edition`, `themes`), jamais des
+points d'interrogation. Fenêtre plus petite que 40×10 → un message, pas une exception. Entrée fermée
+(tuyau, pseudo-terminal sans clavier) → sortie après 20 échecs, jamais de boucle à vide.
+
+### Touches
+
+←→ Tab Maj-Tab `1`…`9` (onglets) · ↑↓ `j` `k` · PgUp PgDn Espace · `g` `G` · `/` filtre (Échap
+l'efface) · Entrée (action) · `r` recharger · `q` quitter.
+
+### Hors contrat, expérimental
+
+Le genre `groupes`, le paramètre `action`, et `lire_tsv()` : utilisables, mais NON garantis tant
+qu'un appelant ne les a pas éprouvés sur une vraie machine. On ne grave pas une intention. Les
+faire entrer au contrat plus tard sera un AJOUT, donc toujours l'API 1.
+
+### Obtenir et mettre à jour dotlib
+
+Un seul poseur, celui-ci ; plusieurs déclencheurs.
+
+- **Absence** — comblée automatiquement, sans question : cloner le dépôt public dans un dossier
+  temporaire, puis exécuter le `bin/deploy-local` **du clone** (`--yes --from-clone <dossier>`),
+  qui prend le verrou, refuse un clone superficiel, conserve `local/` et met en place. Ne recopiez
+  jamais de code de pose.
+- **Mise à jour** — jamais automatique, jamais au démarrage d'un shell ou d'un éditeur :
+  `brc maj` / `vrc maj`, appelant `~/.dotlib/bin/deploy-local --yes --posed-by bash|vim`, le plan
+  affiché d'abord puis confirmation. Sans terminal, la partie dotlib est SAUTÉE et annoncée : on ne
+  met pas à jour le dépôt d'un autre projet sans témoin. Elle passe en dernier, et son échec ne doit
+  pas faire échouer la mise à jour de l'appelant.
+- `--posed-by parc|shell|bash|vim` : information seulement, jamais prise en compte dans un verdict.

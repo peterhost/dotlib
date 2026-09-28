@@ -1,0 +1,112 @@
+vim	aide	,?	l’aide des raccourcis (,? puis un thème avec :Keys)	global
+vim	aide	,fh	chercher une rubrique d’aide	global
+vim	aide	,h	aide sur le MOT complet sous le curseur	dans l’aide
+vim	aide	,h / ,H	aide sur le mot sous le curseur (,h), recherche dans toute l’aide (,H)	global
+vim	aide	Entrée / Retour arrière	suivre un lien (Entrée), revenir en arrière (Retour arrière)	dans l’aide
+vim	aide	o / O	option suivante (o) ou précédente (O)	dans l’aide
+vim	aide	s / S	sujet suivant (s) ou précédent (S)	dans l’aide
+vim	buffers	,bc	fermer les buffers vides	global
+vim	buffers	,be / ,bt / ,bs / ,bv	liste des buffers : ici (,be), bascule (,bt), partage horizontal (,bs) ou vertical (,bv)	global
+vim	buffers	,fb	choisir un buffer	global
+vim	buffers	,ll / ,aa / ,az	choisir un buffer (raccourcis historiques)	global
+vim	buffers	,n / ,p	buffer suivant / précédent (aussi -b et 'b, d'unimpaired)	global
+vim	buffers	,x / ,X / ,Ctrl-x	fermer le buffer en gardant la fenêtre (,x), buffer et fenêtre (,X), la fenêtre seule (,Ctrl-x)	global
+vim	configuration	,eb	éditer ~/.bashrc	global
+vim	configuration	,el	éditer les réglages propres à cette machine	global
+vim	configuration	,ev / ,sv	éditer le vimrc (,ev) puis le recharger (,sv)	global
+vim	diff	Dp / Dg	reporter (Dp) ou récupérer (Dg) le bloc sous le curseur	global
+vim	diff	Du / Dt / Do	rafraîchir (Du), comparer ce buffer (Dt), quitter le diff (Do)	global
+vim	écriture	,P	aperçu du document (markdown-preview, sinon Marked 2 sous macOS)	fichiers markdown
+vim	écriture	|	aligner le tableau markdown au fil de la frappe (tabular)	mode insertion
+vim	édition	,Ctrl-t	aligner sur un motif (:Tabularize)	global
+vim	édition	,y	lister les registres (vim-peekaboo les montre aussi en tapant " ou @)	global
+vim	édition	; / `;	; répète la dernière modification, `; retourne au dernier point modifié	global
+vim	édition	< / >	indenter / désindenter sans perdre la sélection	mode visuel
+vim	édition	~	la sélection en minuscules, puis Capitalisées, puis MAJUSCULES	mode visuel
+vim	édition	Cmd-k / Cmd-j	déplacer la ligne vers le haut / le bas (MacVim)	global
+vim	édition	Ctrl-p / Ctrl-n	juste après un collage : copie plus ancienne (Ctrl-p) ou plus récente (Ctrl-n)	global
+vim	édition	F8	réindenter tout le fichier (ALEFix le remplace là où il est actif)	global
+vim	édition	gV	resélectionner le dernier texte modifié ou collé	global
+vim	édition	K / J / Cmd-k / Cmd-j	déplacer la sélection vers le haut (K, Cmd-k) ou le bas (J, Cmd-j)	mode visuel
+vim	édition	Maj-Entrée	insérer une ligne au-dessus sans passer en insertion	global
+vim	édition	Maj-F7 / ,Maj-Espace / ,Espace	supprimer les espaces en fin de ligne : le fichier, la ligne ou la sélection (,Espace)	global
+vim	édition	p / P / gp / gP	coller, en gardant l’historique des copies sous la main	global
+vim	édition	Q	reformater le paragraphe ou la sélection	global
+vim	fenêtres	↑ / ↓ / ← / →	changer de fenêtre aux flèches	global
+vim	fenêtres	,< / ,>	élargir / rétrécir la fenêtre de 4 colonnes	global
+vim	fenêtres	,sw / ,sm	échanger deux fenêtres : ,sm marque la première, ,sw y place la seconde	global
+vim	fenêtres	Ctrl-h / Ctrl-j / Ctrl-k / Ctrl-l	changer de fenêtre (et de panneau tmux, si tmux-navigator est chargé)	global
+vim	fenêtres	gf	ouvrir le fichier sous le curseur dans un partage vertical	global
+vim	fenêtres	Maj-F5	basculer le redimensionnement automatique (golden ratio)	global
+vim	fichiers	,fd	ouvrir un fichier du dossier du fichier courant	global
+vim	fichiers	,ff	ouvrir un fichier (recherche floue)	global
+vim	fichiers	,fr	rouvrir un fichier récent	global
+vim	fichiers	,t	explorateur de fichiers (NERDTree)	global
+vim	git	,eq / ,Gq / ,sq / ,Gs	gist QUIX (bookmarklets) : publier (,eq, ,Gq) ou éditer (,sq, ,Gs)	global
+vim	git	,ga	ajouter le fichier courant à l’index	global
+vim	git	,gb	ouvrir le fichier sur GitHub (:GBrowse)	global
+vim	git	,gc	valider les fichiers de l’index	global
+vim	git	,gdc / ,gdh / ,gdo	diff de l’index (,gdc), avec HEAD (,gdh), avec ORIG_HEAD (,gdo)	global
+vim	git	,gg	chercher dans les fichiers suivis (:Ggrep)	global
+vim	git	,gl	journal du dépôt (:Gclog)	global
+vim	git	,gs	état du dépôt (:Git)	global
+vim	greffons	,at	afficher ou masquer la barre d’état (airline)	global
+vim	greffons	,u	arbre des annulations (undotree)	global
+vim	langages	,d	aller à la définition (raccourci de jedi-vim, conservé)	fichiers python
+vim	langages	,E	ouvrir la liste des erreurs (ALE)	global
+vim	langages	,h	doc perl du mot ou du module sous le curseur	fichiers perl
+vim	langages	,jsl / ,jsf	vérifier (,jsl) ou corriger (,jsf) le fichier	fichiers javascript
+vim	langages	,N	usages du symbole (,N, car ,n va au buffer suivant)	fichiers python
+vim	langages	,r / ,R	renommer le symbole	fichiers python
+vim	langages	]d / [d	erreur suivante (]d) ou précédente ([d)	global
+vim	langages	=d	commentaire JSDoc pour la fonction courante	fichiers javascript
+vim	langages	=D	documentation du projet avec l’outil jsdoc	fichiers javascript
+vim	langages	aC / iC / aM / iM	objets de texte : classe (aC, iC), fonction ou méthode (aM, iM)	fichiers python
+vim	langages	F8	corriger le fichier (eslint, prettier)	fichiers javascript
+vim	langages	F8	corriger le fichier (ruff)	fichiers python
+vim	langages	F8	reformater le fichier (jq)	fichiers json
+vim	langages	gd	aller à la définition	fichiers javascript
+vim	langages	gd	aller à la définition	fichiers python
+vim	langages	K	documentation du symbole sous le curseur	fichiers python
+vim	navigation	,← / ,→ / ,↑ / ,↓	quickfix : résultat précédent / suivant, fichier précédent / suivant	global
+vim	navigation	,fc	aller à une modification (changes)	global
+vim	navigation	,fj	revenir à un saut précédent (jumps)	global
+vim	navigation	,fl	chercher une ligne du fichier courant	global
+vim	navigation	,ft	sauter à une étiquette (tags)	global
+vim	navigation	,T	liste des symboles du fichier (Tagbar)	global
+vim	navigation	' / - / § / à	accès direct à [ ] { } sans AltGr (clavier AZERTY)	global
+vim	navigation	ù	le % étendu de matchit : sauter à la parenthèse, la balise ou le mot-clé apparié	global
+vim	onglets	=h / =l	onglet précédent (=h) / suivant (=l)	global
+vim	onglets	=j / =k	premier (=j) / dernier (=k) onglet	global
+vim	onglets	=t / =w	nouvel onglet en dernier (=t), fermer l’onglet (=w)	global
+vim	onglets	Alt-↑ / Alt-↓ / Alt-← / Alt-→	premier, dernier, précédent, suivant onglet aux flèches Alt (interface graphique)	global
+vim	onglets	Alt-k / Alt-j / Alt-h / Alt-l	premier, dernier, précédent, suivant onglet à Alt-kjhl (interface graphique)	global
+vim	polices	,= / ,-	agrandir (,=) ou réduire (,-) la police d’un point	interface graphique
+vim	polices	,1 … ,9	choisir une des polices préférées	interface graphique
+vim	recherche	,/ / ,;	éteindre la surbrillance des résultats	global
+vim	recherche	,fg	chercher dans les fichiers (ripgrep s’il est là, sinon :vimgrep)	global
+vim	recherche	,g	amorcer un :vimgrep dans l’arborescence	global
+vim	recherche	* / #	chercher la sélection, en avant (*) ou en arrière (#)	mode visuel
+vim	recherche	gv	chercher la sélection dans les fichiers (:vimgrep)	mode visuel
+vim	repliage	,Ctrl-Espace	replier la balise HTML courante	global
+vim	repliage	Espace / Retour arrière	ouvrir ou fermer le pli sous le curseur (Espace), avec ses plis imbriqués (Retour arrière)	global
+vim	repliage	Maj-Retour arrière / Ctrl-Retour arrière / Ctrl-Maj-Retour arrière	ouvrir (Maj-) ou fermer (Ctrl-) d’un niveau partout, basculer le repliage (Ctrl-Maj-)	global
+vim	saisie	Ctrl-h / Ctrl-j / Ctrl-k / Ctrl-l	déplacer le curseur en insertion	mode insertion
+vim	saisie	Ctrl-h / Ctrl-j / Ctrl-k / Ctrl-l	déplacer le curseur en ligne de commande	ligne de commande
+vim	saisie	Espace	quitter le mode visuel	mode visuel
+vim	saisie	jf / fj	quitter la ligne de commande	ligne de commande
+vim	saisie	jf / fj	quitter le mode insertion	mode insertion
+vim	saisie	Maj-Tab	développer un snippet ou sauter au champ suivant	mode insertion
+vim	sessions	,wl	rouvrir la session la plus récente	global
+vim	sessions	,ws / ,wo / ,ww	suivre une nouvelle session (,ws), en ouvrir une (,wo, ,ww)	global
+vim	sessions	,wv	afficher la session suivie	global
+vim	sessions	,wx	mettre le suivi de session en pause	global
+vim	système	,Ctrl-e	rouvrir le fichier dans un autre encodage	global
+vim	système	,q	terminal intégré dans un onglet (ou :shell si vim n’a pas +terminal)	global
+vim	système	,rr	redessiner l’écran	global
+vim	système	F3	basculer les numéros de ligne relatifs	global
+vim	système	w!!	enregistrer avec sudo un fichier ouvert sans les droits	ligne de commande
+vim	thèmes	,$ / Alt-Espace	choisir un thème (,$ liste, Alt-Espace amorce :Theme)	global
+vim	thèmes	,$n / ,$p	thème suivant / précédent	global
+vim	thèmes	,sc	afficher tous les groupes de couleurs	global
+vim	thèmes	F5	basculer clair / sombre, pour cette session seulement	global

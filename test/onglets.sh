@@ -72,8 +72,50 @@ out=$( ( sleep 1.2; printf q; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:
        script -q /dev/null sh -c "stty rows 6 cols 30; $PY \"$TMP/essai.py\"; echo CODE=\$?" 2>&1 | tr -d '\r')
 case $out in *"trop petite"*CODE=0*) ok "fenêtre trop petite : message clair, sortie propre" ;; *) ko "petite fenêtre" "$(printf '%s' "$out" | tail -3)" ;; esac
 
-# (Entrée fermée : le code sort après 20 échecs de lecture ; le banc macOS « script » garde le pseudo-terminal
-# ouvert après la fin de l'entrée, ce cas n'y est pas reproductible.)
+# 8 bis. Entrée fermée — le plus grave des défauts corrigés (boucle à 100 % de processeur).
+# « script » garde le pseudo-terminal ouvert après la fin de l'entrée : la lecture BLOQUE au lieu de lever,
+# et le programme paraît sain. Il faut donc fabriquer le vrai cas — pty.openpty(), puis fermeture du maître.
+# Le test vérifie aussi qu'il ÉCHOUE quand on retire le compteur : un test qui ne tombe pas quand on casse
+# ce qu'il surveille ne protège rien. (Écrit par la session vim, repris tel quel.)
+out=$($PY "$ROOT/test/entree-fermee.py" "$ROOT/lib/onglets.py" 2>&1)
+case $out in
+  *"ok   entrée fermée"*"ok   sans le compteur"*) ok "entrée fermée : sortie après 20 échecs, et le test protège bien ce code" ;;
+  *) ko "entrée fermée" "$out" ;;
+esac
+
+# 8 ter. Le cas réel d'un appelant : 112 raccourcis de ~/.vim (deux colonnes de touches longues, vingt
+# thèmes, accents, apostrophes typographiques). Rendu en UTF-8 puis en locale C : il doit rester LISIBLE.
+ech=$ROOT/test/donnees/raccourcis-vim.tsv
+out=$(cd "$TMP" && LC_ALL=C $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets
+lignes = open(sys.argv[1], encoding="utf-8").read().splitlines()
+entrees = [l.split("\t") for l in lignes if l]
+themes = []
+for e in entrees:
+    if e[1] not in themes: themes.append(e[1])
+print("entrees=%d themes=%d" % (len(entrees), len(themes)))
+brut = " ".join(e[3] for e in entrees)
+plat = " ".join(onglets.ascii_lisible(e[3]) for e in entrees)
+print("non-ascii=%d" % sum(1 for c in plat if ord(c) > 126))
+# des « ? » existent légitimement dans les descriptions (le raccourci « ,? ») : on compte ceux que la
+# translittération AJOUTE, c est-à-dire les caractères qu elle n a pas su rendre
+print("interrogations=%d" % (plat.count("?") - brut.count("?")))' "$ech" 2>&1)
+case $out in
+  "entrees=112 themes=20"*"non-ascii=0"*"interrogations=0") ok "échantillon réel : 112 entrées, 20 thèmes, translittérés sans un seul « ? »" ;;
+  *) ko "échantillon réel" "$out" ;;
+esac
+
+# 8 quater. La détection UTF-8 ne doit pas se laisser tromper par Python lui-même (PEP 538 : CPython
+# réécrit LC_CTYPE en « C.UTF-8 » quand la locale vaut C, AVANT que le module ne tourne).
+out=$(env -u LC_ALL -u LC_CTYPE LANG=C $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,"'"$ROOT"'/lib")
+import onglets; print(onglets.utf8())' 2>&1)
+[ "$out" = "False" ] && ok "utf8() : LANG=C rend faux, malgré la réécriture de LC_CTYPE par Python" || ko "utf8() sous LANG=C" "$out"
+out=$(env -u LC_ALL -u LC_CTYPE TERM=linux LANG=fr_FR.UTF-8 $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,"'"$ROOT"'/lib")
+import onglets; print(onglets.utf8())' 2>&1)
+[ "$out" = "False" ] && ok "utf8() : console Linux (TERM=linux) → ASCII d'office" || ko "utf8() sous TERM=linux" "$out"
 
 # 9. sortie() : ni exception ni attente sans fin
 out=$(cd "$TMP" && $PY -c '

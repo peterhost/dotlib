@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 
 API = 1
 
@@ -34,6 +35,37 @@ SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 AIDE = "←→/Tab onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
 AIDE_ASCII = "<-/->/Tab onglet . haut/bas deplacer . PgUp/PgDn page . / filtrer . r recharger . q quitter"
 LARGEUR_MIN, HAUTEUR_MIN = 40, 10
+
+
+def utf8():
+    """Le terminal accepte-t-il l'UTF-8 ? D'après l'ENVIRONNEMENT, comme lib/tui.sh de ce dépôt : deux
+    parties de la même bibliothèque ne peuvent pas se contredire là-dessus.
+
+    Surtout PAS locale.getpreferredencoding() : depuis Python 3.7 (PEP 538/540) il rend « utf-8 » même
+    sous LC_ALL=C, LANG=C et LC_ALL=POSIX — mesuré. Tout repli ASCII fondé sur lui est donc du code
+    mort, et il ne se déclenche jamais là où il sert : un NAS, une console."""
+    if os.environ.get("TERM", "") == "linux":          # console Linux : pas de semi-graphique
+        return False
+    ctype = os.environ.get("LC_CTYPE", "")
+    # PEP 538 : quand la locale vaut C ou POSIX, CPython RÉÉCRIT LC_CTYPE en « C.UTF-8 » dans son
+    # propre environnement, avant que ce code ne tourne. Lire l'environnement ne suffit donc pas :
+    # il faut défaire cette réécriture, sinon on croit à de l'UTF-8 là où le shell, lui, répond non.
+    if ctype in ("C.UTF-8", "C.utf8", "UTF-8") and os.environ.get("LANG", "").upper() in ("", "C", "POSIX"):
+        return False
+    lang = os.environ.get("LC_ALL") or ctype or os.environ.get("LANG") or ""
+    return "utf8" in lang.lower().replace("-", "")
+
+
+def ascii_lisible(texte):
+    """Translittère plutôt que de remplacer par des « ? ». « édition » → « edition », pas « ?dition » :
+    sur les machines où la dégradation sert, cinq thèmes sur vingt devenaient illisibles."""
+    for typo, plat in (("\u2019", "'"), ("\u2018", "'"), ("\u201c", '"'), ("\u201d", '"'),
+                       ("\u00ab", '"'), ("\u00bb", '"'), ("\u00b7", "-"), ("\u2014", "-"),
+                       ("\u2013", "-"), ("\u2026", "..."), ("\u00a0", " ")):
+        texte = texte.replace(typo, plat)      # ponctuation typographique : des mots, pas des « ? »
+    plat = unicodedata.normalize("NFD", texte)
+    plat = "".join(c for c in plat if not unicodedata.combining(c))
+    return plat.encode("ascii", "replace").decode("ascii")
 
 
 def sortie(commande, cwd=None, env=None, delai=60):
@@ -74,10 +106,10 @@ def ordonner(presents, reference):
 class Onglet:
     """Un onglet : un titre, de quoi produire son contenu (chargé à la première ouverture et gardé)."""
 
-    def __init__(self, titre, produire, genre="texte", action=None, liste=None):
+    def __init__(self, titre, produire, genre="texte", action=None):
         self.titre = titre
         self.produire = produire
-        self.genre = "raccourcis" if liste else genre     # liste=True : ancien nom de « raccourcis »
+        self.genre = genre
         self.action = action
         self.contenu = None
         self.rang = 0               # sélection dans la colonne de gauche
@@ -104,8 +136,7 @@ class Interface:
         self.saisie = False
         self.message = ""
         self.paires = {}
-        enc = (locale.getpreferredencoding(False) or "").lower().replace("-", "")
-        self.utf8 = "utf8" in enc
+        self.utf8 = utf8()
         self.h_trait, self.v_trait = ("─", "│") if self.utf8 else ("-", "|")
 
     # --- couleurs : celles de base du terminal, seulement s'il en a assez ; sinon monochrome ----------
@@ -146,7 +177,7 @@ class Interface:
             return
         texte = texte[: max(0, l - x - 1)]
         if not self.utf8:
-            texte = texte.encode("ascii", "replace").decode("ascii")
+            texte = ascii_lisible(texte)
         try:
             self.ecran.addstr(y, x, texte, attr)
         except curses.error:
@@ -155,8 +186,12 @@ class Interface:
     def barre(self):
         h, l = self.ecran.getmaxyx()
         x = 1
+        place = l - (len(self.nom) + 3 if self.nom else 1)
         for i, o in enumerate(self.onglets):
             etiquette = " %d %s " % (i + 1, o.titre)
+            if x + len(etiquette) > place:      # débordement : on le DIT, au lieu d'escamoter la fin
+                self.ecrire(0, min(x, place - 1), "\u203a" if self.utf8 else ">", self.attr("mauvais"))
+                break
             attr = curses.A_REVERSE | curses.A_BOLD if i == self.actif else self.attr("onglet")
             self.ecrire(0, x, etiquette, attr)
             x += len(etiquette) + 1
@@ -187,9 +222,11 @@ class Interface:
         return [t for t in textes if f in t.lower()]
 
     def compteur(self, haut, hauteur, largeur, debut, total):
+        # sous le contenu, pas par-dessus : écrire sur la dernière ligne effaçait la fin d'une ligne
+        # longue, précisément quand il y a beaucoup à lire
         if total > hauteur:
-            self.ecrire(haut + hauteur - 1, largeur - 12, " %d/%d " % (min(debut + hauteur, total), total),
-                        self.attr("portee"))
+            texte = " %d/%d " % (min(debut + hauteur, total), total)
+            self.ecrire(haut + hauteur, max(0, largeur - len(texte) - 2), texte, self.attr("portee"))
 
     def colonne_gauche(self, o, noms, comptes, haut, hauteur):
         o.rang = max(0, min(o.rang, len(noms) - 1))
@@ -218,8 +255,11 @@ class Interface:
         comptes = [sum(1 for e in entrees if e[1] == t) for t in themes]
         colonne = self.colonne_gauche(o, themes, comptes, haut, hauteur)
         lignes = [e for e in entrees if e[1] == themes[o.rang]]
-        # colonne des sources : seulement quand il y en a plus d'une
-        sources = set(e[0] for e in lignes)
+        # Colonne des sources : décidée d'après TOUTES les entrées de l'onglet, jamais d'après celles
+        # que le filtre retient. Sinon elle apparaît et disparaît pendant qu'on tape, et tout le texte
+        # glisse de quelques colonnes sous les doigts de l'utilisateur.
+        toutes = o.contenu.get("entrees", []) if isinstance(o.contenu, dict) else []
+        sources = set(e[0] for e in toutes)
         largeur_src = 0 if len(sources) <= 1 else max(len(x) for x in sources) + 1
         largeur_touches = min(34, max([8] + [len(e[2]) for e in lignes]) + 2)
         o.haut = max(0, min(o.haut, max(0, len(lignes) - hauteur)))
@@ -401,6 +441,8 @@ class Interface:
             elif touche == "G":
                 o = self.onglets[self.actif]
                 o.haut = o.rang = 10 ** 6
+            elif touche == curses.KEY_RESIZE:
+                continue                        # la fenêtre a changé : le prochain dessin relit tout
             elif touche in ("r", "R"):
                 self.onglets[self.actif].recharger()
                 self.message = "onglet rechargé"
