@@ -476,8 +476,11 @@ class Interface:
         self.ecran.erase()
         h, l = self.ecran.getmaxyx()
         if l < LARGEUR_MIN or h < HAUTEUR_MIN:
-            self.ecrire(0, 0, "fenêtre trop petite (%dx%d, il faut %dx%d) — agrandissez, ou q"
-                        % (l, h, LARGEUR_MIN, HAUTEUR_MIN), curses.A_BOLD)
+            # le message doit tenir DANS la fenêtre qu'il décrit : mesuré à 34 colonnes, il était
+            # coupé au milieu (« fenetre trop petite (34x12, il fa »)
+            for i, morceau in enumerate(plier("fenêtre trop petite : %dx%d, il faut %dx%d — agrandis, ou q"
+                                              % (l, h, LARGEUR_MIN, HAUTEUR_MIN), max(8, l - 1))[:max(1, h)]):
+                self.ecrire(i, 0, morceau, curses.A_BOLD)
             self.ecran.refresh()
             return
         self.barre()
@@ -672,6 +675,13 @@ def lancer(onglets, nom=""):
     est toujours rendu (curses.wrapper), y compris si un onglet lève une exception."""
     if not onglets or not sys.stdin.isatty() or not sys.stdout.isatty():
         print("%s : pas de terminal pour l'interface" % (nom or "interface"), file=sys.stderr)
+        return 4
+    # TERM=dumb : curses ne lève pas forcément — mesuré sur un NAS, il démarre et peint un écran de
+    # blancs, donc l'appelant croit avoir affiché quelque chose. Un terminal qui ne sait pas placer
+    # le curseur ne peut pas porter une interface : on refuse, et l'appelant écrit son texte.
+    if os.environ.get("TERM", "") in ("", "dumb"):
+        print("%s : terminal sans capacités (TERM=%s) — affichage en texte"
+              % (nom or "interface", os.environ.get("TERM") or "vide"), file=sys.stderr)
         return 4
     try:
         locale.setlocale(locale.LC_ALL, "")

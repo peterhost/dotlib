@@ -130,6 +130,16 @@ print(onglets.sortie(["sh", "-c", "printf \"\\033[31mrouge\\033[0m\\n\""]))' 2>&
 (commande absente
 ['rouge']" ] && ok "sortie() : délai maximal, entrée fermée (cat ne bloque pas), commande absente, couleurs retirées" || ko "sortie()" "$out"
 
+# 9 bis. TERM=dumb : curses ne lève PAS forcément — mesuré sur un NAS, il démarre et peint un écran
+# de blancs, donc l'appelant croit avoir affiché quelque chose alors que l'utilisateur voit une
+# bouillie. On refuse d'emblée, pour que l'appelant écrive son texte.
+out=$(cd "$TMP" && printf 'q' | TERM=dumb script -q /dev/null $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets
+print("CODE=%d" % onglets.lancer([onglets.Onglet("T", lambda: ["x"])], "essai"))' 2>&1 | tr -d "\r")
+case $out in *CODE=4*) ok "TERM=dumb : refus propre (code 4), l'appelant affiche son texte" ;;
+             *) ko "TERM=dumb" "$out" ;; esac
+
 # 10. LE CONTRAT ET LE CODE DISENT-ILS LA MÊME CHOSE ? API.md a documenté « API_COMPATIBLES »
 # pendant que le code ne l'avait pas : un appelant qui suit la documentation lit un attribut
 # inexistant et dégrade EN SILENCE. Ce test ferme la classe entière du défaut : tout nom
