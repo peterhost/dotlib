@@ -40,7 +40,7 @@ export PATH GIT_TERMINAL_PROMPT=0
 
 DIR="$HOME/.dotlib"
 REPO_URL="https://github.com/peterhost/dotlib.git"
-BRANCH=master
+BRANCH=main
 YES=0; JSON=0; DRY=0; QUIET=0; MODE=deploy; CLONE=; POSED_BY=parc; EXPECT=; REMOTE=0
 [ -t 0 ] || YES=1
 
@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
   case $1 in
     --dir) shift; DIR=${1:-} ;;
     --repo-url) shift; REPO_URL=${1:-} ;;
-    --branch) shift; BRANCH=${1:-master} ;;
+    --branch) shift; BRANCH=${1:-main} ;;
     --from-clone) shift; CLONE=${1:-} ;;
     --posed-by) shift; POSED_BY=${1:-parc} ;;
     --expect) shift; EXPECT=${1:-} ;;
