@@ -20,12 +20,27 @@
 #
 # Lancé par « make check » (via test/), par le crochet pre-push, et à la main avant toute poussée.
 
+# AVEC DES FICHIERS EN ARGUMENT : on vérifie ce qui SORT du dépôt avant de le livrer, au lieu de ne
+# voir que ce qui y est déjà entré — c'est-à-dire trop tard. L'idée vient d'un incident réel : deux
+# fichiers de test donnés par un dépôt voisin portaient un chemin en dur contenant un nom de compte,
+# et seul le crochet pre-push les a arrêtés, une fois qu'ils étaient chez nous.
+# Dans ce mode, le contrôle de l'identité des commits est SAUTÉ : refuser tout ce qui sort d'un dépôt
+# dont l'historique porte de vieilles adresses ferait crier le test à chaque fois, et un test qui
+# crie toujours finit par être ignoré.
+DONNES=$*
+if [ -n "$DONNES" ]; then
+  NB=0
+  signaler() { NB=$((NB + 1)); printf '  ✗ %s\n' "$1"; }
+  suivis() { printf '%s\n' $DONNES; }
+  echo "anti-fuite : $(suivis | wc -l | tr -d ' ') fichier(s) donné(s) en argument"
+else
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "anti-fuite : pas dans un dépôt git"; exit 2; }
 NB=0
 signaler() { NB=$((NB + 1)); printf '  ✗ %s\n' "$1"; }
 suivis() { git ls-files; }
 
 echo "anti-fuite : $(suivis | wc -l | tr -d ' ') fichier(s) suivi(s)"
+fi
 
 # ---------------------------------------------------------------- 1. motifs génériques
 # Adresses IPv4, sauf celles réservées à la documentation et aux exemples (RFC 5737, RFC 5735).
@@ -65,10 +80,10 @@ $trouve"
 # celui qui l'a produit. Il n'a rien à faire dans un dépôt, et encore moins dans un dépôt public —
 # le cas s'est produit dans un dépôt voisin. Ils sont ignorés par .gitignore ; ceci vérifie qu'aucun
 # n'a été ajouté de force, et que rien ne traîne dans l'arbre de travail.
-trouve=$(suivis | grep -E '(^|/)__pycache__/|\.pyc$')
+trouve=$([ -z "$DONNES" ] && suivis | grep -E '(^|/)__pycache__/|\.pyc$')
 [ -n "$trouve" ] && signaler "octets compilés Python suivis par git :
 $trouve"
-trouve=$(find . -name '__pycache__' -not -path './.git/*' 2>/dev/null)
+trouve=$([ -z "$DONNES" ] && find . -name '__pycache__' -not -path './.git/*' 2>/dev/null)
 [ -n "$trouve" ] && signaler "dossier __pycache__ présent dans l'arbre (à effacer ; les appelants
     doivent poser sys.dont_write_bytecode = True avant d'importer) :
 $trouve"
@@ -76,7 +91,7 @@ $trouve"
 # ---------------------------------------------------------------- 2. identité des commits
 # Une adresse dans les métadonnées d'un commit est publique pour toujours : réécrire l'historique
 # après coup ne la retire ni des clones ni des caches de GitHub.
-trouve=$(git log --format='%ae%n%ce' | sort -u | grep -vE '@users\.noreply\.github\.com$')
+trouve=$([ -z "$DONNES" ] && git log --format='%ae%n%ce' | sort -u | grep -vE '@users\.noreply\.github\.com$')
 [ -n "$trouve" ] && signaler "adresse non-noreply dans l'historique (auteur ou validateur) :
 $trouve"
 
