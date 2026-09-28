@@ -81,4 +81,6 @@ path bad note surface text_on_surface crust`. Des lignes et des rôles peuvent s
 
 Contrat de pose des modules tiers : options `--check` `--json` `--yes` `--dry-run` `--quiet` `--purge`
 `--from-clone` `--posed-by` `--expect` `--remote` ; une ligne JSON sur la sortie standard avec `--json` ;
-codes 0 conforme, 1 erreur ou occupé, 2 usage, 3 dégradé, 4 absent, 5 mise à jour disponible, 6 dépôt inaccessible.
+codes 0 conforme, 1 erreur ou occupé, 2 usage, 3 dégradé, 4 absent, 5 mise à jour disponible,
+6 dépôt inaccessible (réseau), 7 outil manquant sur la machine (git) — 7 est distinct de 6 :
+il se règle en une commande, que le message donne.

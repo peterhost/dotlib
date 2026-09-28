@@ -29,7 +29,10 @@
 #   --purge            efface dotlib (local/ compris) et ses restes
 #
 # Codes de sortie : 0 conforme, 1 erreur (ou occupé), 2 usage, 3 installé mais dégradé,
-# 4 absent, 5 mise à jour disponible, 6 réseau ou dépôt inaccessible (rien n'a été modifié).
+# 4 absent, 5 mise à jour disponible, 6 réseau ou dépôt inaccessible (rien n'a été modifié),
+# 7 un OUTIL MANQUE sur cette machine (git) — distinct de 6 : ce n'est pas une panne de réseau,
+# ça se règle en une commande, et le message la donne. Confondre les deux fait chercher une
+# panne qui n'existe pas (cas vécu : une machine sans git annonçait « réseau inaccessible »).
 # Ce script ne connaît aucune machine : tout vient de la machine elle-même et des arguments.
 
 set -u
@@ -200,7 +203,23 @@ if [ "$YES" = 0 ]; then
   case $a in [oOyY]*) ;; *) echo "abandon, rien n'a été modifié"; exit 0 ;; esac
 fi
 
-command -v git >/dev/null 2>&1 || fail "git absent sur cette machine" 6
+# git manque : on dit COMMENT l'installer, selon le système. Rien de la bibliothèque n'est
+# chargeable ici (elle n'est pas encore posée), d'où ces quelques lignes autonomes.
+if ! command -v git >/dev/null 2>&1; then
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) hint="xcode-select --install (ou brew install git)" ;;
+    Linux)
+      if [ -f /etc/synoinfo.conf ] || [ -d /var/packages ]; then
+        hint="paquet Git Server dans DSM, ou opkg install git git-http (Entware)"
+      elif [ -r /etc/os-release ] && grep -qiE 'debian|ubuntu|raspbian|osmc|mint' /etc/os-release; then
+        hint="sudo apt install git"
+      elif [ -r /etc/os-release ] && grep -qiE 'fedora|rhel|centos' /etc/os-release; then
+        hint="sudo dnf install git"
+      else hint="installe git avec le gestionnaire de paquets de cette machine"; fi ;;
+    *) hint="installe git avec le gestionnaire de paquets de cette machine" ;;
+  esac
+  fail "git absent sur cette machine : $hint" 7
+fi
 lock
 # Restes d'une pose interrompue (on tient le verrou : ils ne sont à personne), sauf le clone fourni
 for d in "$DIR".tmp.*; do [ -d "$d" ] && [ "$d" != "$CLONE" ] && rm -rf "$d"; done
