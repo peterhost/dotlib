@@ -22,7 +22,7 @@ poussée ne se rattrape pas, réécrire l'historique ne retire rien des clones n
   chaque changement et pousse. Elle arbitre quand deux projets veulent la même chose autrement.
 - Les **sessions `~/.bash` et `~/.vim`** codent ici et proposent. Rien n'arrive dans la branche
   principale sans relecture.
-- **Pierre ne lance pas de session dans ce dépôt** : ce sont nos sessions qui y travaillent, de
+- **Le propriétaire ne lance pas de session dans ce dépôt** : ce sont nos sessions qui y travaillent, de
   façon coordonnée. Les décisions qui l'engagent (visibilité, licence, identité publique) sont les
   siennes, et se demandent avant, pas après.
 - Un mainteneur qui s'évapore n'est pas un mainteneur : **tout ce qui fait la gouvernance vit dans

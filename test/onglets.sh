@@ -180,5 +180,16 @@ case $out in *Traceback*) ko "lancer() laisse échapper une exception" "$out" ;;
              *CODE=4*)    ok "lancer() ne lève jamais : défaut hors onglet → code 4, pas de trace" ;;
              *)           ko "lancer() : ni trace ni code 4" "$out" ;; esac
 
+# 14 et 15. Le pliage et la palette, éprouvés par les tests de la session vim (repris tels quels :
+# ils sont mesurés sur ses vraies données, et ils refusent de conclure si le module n'expose pas la
+# fonction attendue — plutôt que de passer à vide).
+for t in pliage palette; do
+  out=$($PY "$ROOT/test/$t.py" "$ROOT/lib/onglets.py" 2>&1)
+  case $out in
+    *ÉCHEC*|*Traceback*) ko "$t" "$out" ;;
+    *) printf '%s' "$out" | grep -c '  ok ' >/dev/null && ok "$t : $(printf '%s' "$out" | grep -c '  ok ') vérification(s)" || ko "$t" "$out" ;;
+  esac
+done
+
 printf '\n%s%d réussis%s, %d échecs\n' "$G" "$PASS" "$N" "$FAIL"
 [ $FAIL -eq 0 ]

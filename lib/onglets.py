@@ -35,8 +35,8 @@ API = 1
 API_COMPATIBLES = (1,)
 
 SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
-AIDE = "←→/Tab onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
-AIDE_ASCII = "<-/->/Tab onglet . haut/bas deplacer . PgUp/PgDn page . / filtrer . r recharger . q quitter"
+AIDE = "←→ onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
+AIDE_ASCII = "<-/-> onglet . haut/bas deplacer . PgUp/PgDn page . / filtrer . r recharger . q quitter"
 LARGEUR_MIN, HAUTEUR_MIN = 40, 10
 
 
@@ -63,6 +63,74 @@ def utf8():
         return False
     lang = os.environ.get("LC_ALL") or ctype or os.environ.get("LANG") or ""
     return "utf8" in lang.lower().replace("-", "")
+
+
+def palette_dotlib():
+    """Les couleurs du thème actif du shell — celui que règle « brc theme ».
+
+    dotlib publie ses palettes en DONNÉES (share/palettes.tsv : palette, fond, rôle, hexa, index
+    256 couleurs) : on lit l'index et on obtient exactement les couleurs des autres outils du shell,
+    sans rien recalculer. La palette et le fond viennent des variables exportées par le shell, sinon
+    de local/theme.conf ; « auto » est résolu par le shell, jamais ici.
+
+    GARANTIE DU CONTRAT : ni exception, ni dépendance dure. Fichier absent, ligne mal formée, index
+    illisible → {} → couleurs de base du terminal. C'est la première fois que ce module lit un
+    fichier ; il doit pouvoir s'en passer entièrement.
+    (Note : l'interface du parc SSH, elle, n'utilise PAS de palette — décision du propriétaire, et elle ne
+    dépendra jamais de dotlib puisque c'est elle qui sert à le poser.)"""
+    dossier = os.environ.get("DOTLIB_DIR") or os.path.expanduser("~/.dotlib")
+    palette = os.environ.get("DOTLIB_PALETTE_EFF", "")
+    fond = os.environ.get("DOTLIB_THEME_EFF", "")
+    if not palette or not fond:
+        try:
+            with open(os.path.join(dossier, "local", "theme.conf"), encoding="utf-8") as f:
+                for ligne in f:
+                    cle, _, valeur = ligne.strip().partition("=")
+                    if cle == "DOTLIB_PALETTE" and not palette:
+                        palette = valeur
+                    elif cle == "DOTLIB_THEME" and not fond:
+                        fond = valeur
+        except OSError:
+            pass
+    if fond not in ("dark", "light"):
+        fond = "dark"
+    if not palette or palette in ("xterm", "actuel"):
+        return {}                         # « les couleurs du terminal » : on n'y touche pas
+    roles = {}
+    try:
+        with open(os.path.join(dossier, "share", "palettes.tsv"), encoding="utf-8") as f:
+            for ligne in f:
+                champs = ligne.rstrip("\n").split("\t")
+                if len(champs) >= 5 and champs[0] == palette and champs[1] == fond:
+                    roles[champs[2]] = int(champs[4])
+    except (OSError, ValueError):
+        return {}
+    return roles
+
+
+def plier(texte, largeur):
+    """Replie un texte sur autant de lignes d'écran qu'il en faut, en coupant sur les espaces.
+
+    Tronquer perdait la fin des descriptions : mesuré sur les 112 raccourcis de ~/.vim, à 76 colonnes
+    — un tmux partagé en deux, une console — 86 entrées sur 112 perdaient du texte, jusqu'à 98
+    caractères. Or la fin d'une description est justement ce qui dit à quoi sert le raccourci, et une
+    liste de touches tronquée retire à l'utilisateur une touche qu'il ne peut plus connaître.
+    Un mot plus long que la largeur est coupé net : mieux vaut une coupure qu'une ligne qui déborde.
+    (Fonction de la session vim, mesurée chez elle, reprise telle quelle.)"""
+    if largeur < 8:                       # place dérisoire : on ne plie pas, on coupe
+        return [texte[: max(1, largeur)]]
+    morceaux = []
+    reste = texte
+    while reste:
+        if len(reste) <= largeur:
+            morceaux.append(reste)
+            break
+        coupe = reste.rfind(" ", 0, largeur + 1)
+        if coupe <= 0:
+            coupe = largeur
+        morceaux.append(reste[:coupe].rstrip())
+        reste = reste[coupe:].lstrip()
+    return morceaux or [""]
 
 
 def ascii_lisible(texte):
@@ -127,6 +195,11 @@ class Onglet:
         self.genre = genre
         self.action = action
         self.contenu = None
+        self.total_ecran = 0            # lignes d'écran du dernier rendu (pages, G, compteur)
+        self.focus = "droite"           # deux volets : « gauche » (la liste) ou « droite » (le contenu)
+        self.colonne = 0                # abscisse du séparateur, publiée par le rendu (souris)
+        self.hauteur = 1                # hauteur visible, publiée par le rendu (pages)
+        self.debut_noms = 0             # première section affichée à gauche (clic)
         self.rang = 0               # sélection dans la colonne de gauche
         self.haut = 0               # première ligne affichée
 
@@ -157,14 +230,20 @@ class Interface:
 
     # --- couleurs : celles de base du terminal, seulement s'il en a assez ; sinon monochrome ----------
     def couleurs(self):
+        """TROIS étages : la palette du shell (256 couleurs et tous les rôles présents), les couleurs
+        de base du terminal, puis le monochrome. Les gardes du dernier étage ne sont pas
+        décoratives : un NAS sous DSM rapporte COLORS=0 malgré des terminfo présents, et
+        use_default_colors() comme init_pair() y lèvent — sans try, l'interface ne s'ouvrirait pas
+        là où elle marcherait très bien en monochrome."""
         noms = (("titre", curses.COLOR_YELLOW), ("touche", curses.COLOR_CYAN), ("portee", curses.COLOR_BLUE),
                 ("mauvais", curses.COLOR_RED), ("onglet", curses.COLOR_GREEN))
         self.paires = dict((n, 0) for n, _ in noms)
+        self.paires["choix"] = 0        # surbrillance de la sélection (la paire des correspondances)
         try:
             if not curses.has_colors():
                 return
             curses.start_color()
-            if curses.COLORS < 8 or curses.COLOR_PAIRS <= len(noms):
+            if curses.COLORS < 8 or curses.COLOR_PAIRS <= len(noms) + 1:
                 return
         except curses.error:
             return
@@ -173,6 +252,25 @@ class Interface:
             fond = -1
         except curses.error:
             fond = curses.COLOR_BLACK
+        # rôles de dotlib ↔ rôles d'ici : les touches sont des « clés », les titres des « notes »,
+        # la portée un chemin grisé, le mauvais un « bad », l'onglet une date
+        corresp = (("titre", "note"), ("touche", "key"), ("portee", "path"),
+                   ("mauvais", "bad"), ("onglet", "date"))
+        palette = palette_dotlib()
+        if palette and getattr(curses, "COLORS", 8) >= 256 and all(r in palette for _, r in corresp):
+            for i, (nom, role) in enumerate(corresp, start=1):
+                try:
+                    curses.init_pair(i, palette[role], fond)
+                    self.paires[nom] = curses.color_pair(i)
+                except curses.error:
+                    pass
+            if "match_fg" in palette and "match_bg" in palette:
+                try:
+                    curses.init_pair(6, palette["match_fg"], palette["match_bg"])
+                    self.paires["choix"] = curses.color_pair(6)
+                except curses.error:
+                    pass
+            return
         for i, (nom, couleur) in enumerate(noms, start=1):
             try:
                 curses.init_pair(i, couleur, fond)
@@ -222,6 +320,9 @@ class Interface:
             self.ecrire(h - 2, max(0, l - len(self.position) - 2), self.position, self.attr("portee"))
         aide = AIDE if self.utf8 else AIDE_ASCII
         o = self.onglets[self.actif]
+        if self.deux_volets(o):
+            # sans cela, on ne sait pas ce que les flèches vont déplacer
+            aide = ("[%s] Tab change de volet · " % ("liste" if o.focus == "gauche" else "contenu")) + aide
         if o.genre == "groupes" and o.action:
             aide = "Entrée appliquer · " + aide
         if self.saisie:
@@ -251,9 +352,17 @@ class Interface:
         o.rang = max(0, min(o.rang, len(noms) - 1))
         colonne = min(26, max(14, max(len(t) for t in noms) + 6))
         debut = max(0, min(o.rang - hauteur + 2, len(noms) - hauteur))
+        o.colonne, o.debut_noms = colonne, debut
         for i, t in enumerate(noms[debut:debut + hauteur]):
             rang = debut + i
-            attr = curses.A_REVERSE if rang == o.rang else self.attr("titre", True)
+            if rang != o.rang:
+                attr = self.attr("titre", True)
+            elif o.focus == "gauche":
+                attr = self.paires.get("choix") or curses.A_REVERSE
+            else:
+                # le focus est à droite : la section choisie reste reconnaissable, sans monopoliser
+                # l'attention — sinon on ne sait plus ce que l'on va déplacer
+                attr = curses.A_UNDERLINE | curses.A_BOLD
             self.ecrire(haut + i, 1, t[: colonne - 6].ljust(colonne - 5), attr)
             self.ecrire(haut + i, colonne - 4, "%3d" % comptes[rang], self.attr("portee"))
         for y in range(hauteur):
@@ -280,21 +389,39 @@ class Interface:
         toutes = o.contenu.get("entrees", []) if isinstance(o.contenu, dict) else []
         sources = set(e[0] for e in toutes)
         largeur_src = 0 if len(sources) <= 1 else max(len(x) for x in sources) + 1
-        largeur_touches = min(34, max([8] + [len(e[2]) for e in lignes]) + 2)
-        o.haut = max(0, min(o.haut, max(0, len(lignes) - hauteur)))
-        for i, e in enumerate(lignes[o.haut:o.haut + hauteur]):
+        # La colonne des touches ne prend jamais plus du tiers de la largeur : sinon, sur 76
+        # colonnes, « Ctrl-h / Ctrl-j / Ctrl-k / Ctrl-l » lui réserve 34 colonnes et étouffe la
+        # description, qui se replie alors sur quatre lignes pour rien.
+        largeur_touches = min(34, max(largeur // 3, 10), max([8] + [len(e[2]) for e in lignes]) + 2)
+        # Une entrée occupe désormais AUTANT DE LIGNES D'ÉCRAN que son texte en demande : touches et
+        # description se replient chacune de leur côté et se juxtaposent par index, de sorte que la
+        # suite d'une liste de touches reste sous les touches. Le défilement porte donc sur ces
+        # lignes d'écran et non plus sur les entrées : sinon o.haut, g/G et le compteur ne veulent
+        # plus rien dire.
+        ecran = []
+        x_touches = colonne + 2 + largeur_src
+        x_desc = x_touches + largeur_touches
+        for e in lignes:
             source, _, touches, description, portee = e[:5]
-            x = colonne + 2
-            if largeur_src:
-                self.ecrire(haut + i, x, source, self.attr("portee"))
-                x += largeur_src
             # filet : une source qui enverrait le caractère espace au lieu de son nom
-            self.ecrire(haut + i, x, (touches if touches.strip() else "Espace")[: largeur_touches - 1],
-                        self.attr("touche", True))
-            x += largeur_touches
+            tw = plier(touches if touches.strip() else "Espace", max(1, largeur_touches - 1))
             texte = description + ("  (%s)" % portee if portee and portee != "global" else "")
-            self.ecrire(haut + i, x, texte)
-        self.compteur(haut, hauteur, largeur, o.haut, len(lignes))
+            dw = plier(texte, max(1, largeur - x_desc - 1))
+            for j in range(max(len(tw), len(dw))):
+                segments = []
+                if j == 0 and largeur_src:
+                    segments.append((colonne + 2, source, self.attr("portee")))
+                if j < len(tw):
+                    segments.append((x_touches, tw[j], self.attr("touche", True)))
+                if j < len(dw):
+                    segments.append((x_desc, dw[j], 0))
+                ecran.append(segments)
+        o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
+        o.total_ecran = len(ecran)
+        for i, segments in enumerate(ecran[o.haut:o.haut + hauteur]):
+            for x, texte, attr in segments:
+                self.ecrire(haut + i, x, texte, attr)
+        self.compteur(haut, hauteur, largeur, o.haut, len(ecran))
 
     def dessiner_groupes(self, o, haut, hauteur, largeur):
         groupes = o.charger()
@@ -329,10 +456,21 @@ class Interface:
         if not lignes:
             self.ecrire(haut + 1, 2, "(rien à afficher)", self.attr("portee"))
             return
-        o.haut = max(0, min(o.haut, max(0, len(lignes) - hauteur)))
-        for i, l in enumerate(lignes[o.haut:o.haut + hauteur]):
-            self.ecrire(haut + i, 1, l, self.style_ligne(l))
-        self.compteur(haut, hauteur, largeur, o.haut, len(lignes))
+        # Même pliage : une ligne trop longue se replie, la suite décalée de trois colonnes pour
+        # qu'on voie qu'elle appartient à la précédente. Les états et les journaux produisent
+        # couramment des lignes de 90 à 110 caractères (chemin, branche, commit, thème sur une ligne).
+        ecran = []
+        for l in lignes:
+            style = self.style_ligne(l)
+            morceaux = plier(l, max(1, largeur - 2))
+            ecran.append((1, morceaux[0], style))
+            for suite in morceaux[1:]:
+                ecran.append((4, suite, style))
+        o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
+        o.total_ecran = len(ecran)
+        for i, (x, texte, style) in enumerate(ecran[o.haut:o.haut + hauteur]):
+            self.ecrire(haut + i, x, texte, style)
+        self.compteur(haut, hauteur, largeur, o.haut, len(ecran))
 
     def dessiner(self):
         self.ecran.erase()
@@ -346,6 +484,7 @@ class Interface:
         self.position = ""              # un onglet qui tient à l'écran n'hérite pas du compteur du précédent
         haut, hauteur = 2, max(1, h - 4)
         o = self.onglets[self.actif]
+        o.hauteur = hauteur             # publiée pour les pages et la souris
         if o.contenu is None:
             self.ecrire(haut + 1, 2, "chargement…" if self.utf8 else "chargement...", self.attr("portee"))
             self.pied()
@@ -369,18 +508,64 @@ class Interface:
         self.ecran.refresh()
 
     # --- boucle -----------------------------------------------------------------------------------------
-    def deplacer(self, pas):
+    def deux_volets(self, o):
+        return o.genre in ("raccourcis", "groupes")
+
+    def deplacer(self, pas, o=None):
+        """Déplace CE QUI A LE FOCUS : la section à gauche, le contenu à droite.
+
+        Avant, les flèches ne touchaient que la sélection de section : une section plus longue que
+        la fenêtre — 86 entrées, 175 lignes d'écran après pliage — n'était tout simplement pas
+        lisible jusqu'au bout."""
+        o = o or self.onglets[self.actif]
+        if self.deux_volets(o) and o.focus == "gauche":
+            o.rang = max(0, o.rang + pas)
+            o.haut = 0                  # nouvelle section : on la lit depuis le début
+        else:
+            o.haut = max(0, min(o.haut + pas, max(0, o.total_ecran - 1)))
+
+    def page(self, sens, fraction=1):
         o = self.onglets[self.actif]
-        if o.genre in ("raccourcis", "groupes"):
+        self.deplacer(sens * max(1, int(o.hauteur * fraction)), o)
+
+    def bord(self, fin):
+        o = self.onglets[self.actif]
+        if self.deux_volets(o) and o.focus == "gauche":
+            o.rang = 10 ** 6 if fin else 0
+            o.haut = 0
+        else:
+            o.haut = max(0, o.total_ecran - o.hauteur) if fin else 0
+
+    def defiler_cote(self, o, cote, pas):
+        """Défiler un volet SANS lui donner le focus : c'est ce qu'on attend d'une molette."""
+        if cote == "gauche":
             o.rang = max(0, o.rang + pas)
             o.haut = 0
         else:
-            o.haut = max(0, o.haut + pas)
+            o.haut = max(0, min(o.haut + pas, max(0, o.total_ecran - 1)))
 
-    def page(self, sens):
-        h, _ = self.ecran.getmaxyx()
+    def souris(self):
+        """Molette et clic. NON ÉPROUVÉE : on ne peut pas injecter un événement souris depuis un
+        script (une séquence SGR envoyée par tmux est relue comme des touches ordinaires, ce qui
+        fait changer d'onglet et croire à un défaut). À essayer à la main."""
+        try:
+            _, x, y, _, etat = curses.getmouse()
+        except curses.error:
+            return
         o = self.onglets[self.actif]
-        o.haut = max(0, o.haut + sens * max(1, h - 6))
+        deux = self.deux_volets(o)
+        cote = "gauche" if (deux and x <= o.colonne) else "droite"
+        haut_zone = 2
+        if etat & getattr(curses, "BUTTON4_PRESSED", 0x80000):
+            self.deplacer(-3, o) if cote == o.focus else self.defiler_cote(o, cote, -3)
+        elif etat & getattr(curses, "BUTTON5_PRESSED", 0x200000):
+            self.deplacer(3, o) if cote == o.focus else self.defiler_cote(o, cote, 3)
+        elif etat & getattr(curses, "BUTTON1_PRESSED", 0x2):
+            if deux:
+                o.focus = cote
+            if cote == "gauche" and haut_zone <= y < haut_zone + o.hauteur:
+                o.rang = max(0, o.debut_noms + (y - haut_zone))
+                o.haut = 0
 
     def appliquer(self):
         o = self.onglets[self.actif]
@@ -439,10 +624,20 @@ class Interface:
                 self.filtre = ""
             elif touche in ("\n", "\r", curses.KEY_ENTER):
                 self.appliquer()
-            elif touche == "\t" or touche == curses.KEY_RIGHT:
+            elif touche in ("\t", curses.KEY_BTAB):
+                # Tab passe d'un volet à l'autre quand il y en a deux ; sinon il garde son ancien
+                # effet (onglet suivant), pour ne pas devenir une touche morte.
+                o = self.onglets[self.actif]
+                if self.deux_volets(o):
+                    o.focus = "droite" if o.focus == "gauche" else "gauche"
+                else:
+                    self.actif = (self.actif + (1 if touche == "\t" else -1)) % len(self.onglets)
+            elif touche == curses.KEY_RIGHT:
                 self.actif = (self.actif + 1) % len(self.onglets)
-            elif touche == curses.KEY_BTAB or touche == curses.KEY_LEFT:
+            elif touche == curses.KEY_LEFT:
                 self.actif = (self.actif - 1) % len(self.onglets)
+            elif touche == curses.KEY_MOUSE:
+                self.souris()
             elif isinstance(touche, str) and touche in "123456789":
                 n = int(touche) - 1
                 if n < len(self.onglets):
@@ -451,16 +646,18 @@ class Interface:
                 self.deplacer(1)
             elif touche in (curses.KEY_UP, "k"):
                 self.deplacer(-1)
-            elif touche in (curses.KEY_NPAGE, " "):
+            elif touche in (curses.KEY_NPAGE, " ", "\x06"):     # Ctrl-f
                 self.page(1)
-            elif touche == curses.KEY_PPAGE:
+            elif touche in (curses.KEY_PPAGE, "\x02"):          # Ctrl-b
                 self.page(-1)
+            elif touche == "\x04":                              # Ctrl-d : demi-page
+                self.page(1, 0.5)
+            elif touche == "\x15":                              # Ctrl-u : demi-page
+                self.page(-1, 0.5)
             elif touche == "g":
-                o = self.onglets[self.actif]
-                o.haut = o.rang = 0
+                self.bord(False)
             elif touche == "G":
-                o = self.onglets[self.actif]
-                o.haut = o.rang = 10 ** 6
+                self.bord(True)
             elif touche == curses.KEY_RESIZE:
                 continue                        # la fenêtre a changé : le prochain dessin relit tout
             elif touche in ("r", "R"):
@@ -487,6 +684,11 @@ def lancer(onglets, nom=""):
         except curses.error:
             pass
         ecran.keypad(True)
+        try:                            # souris : un terminal qui ne la gère pas ne doit rien casser
+            curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+            curses.mouseinterval(0)
+        except (curses.error, AttributeError):
+            pass
         interface = Interface(ecran, onglets, nom)
         interface.couleurs()
         interface.boucle()
