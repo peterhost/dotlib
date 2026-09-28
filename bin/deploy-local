@@ -186,23 +186,6 @@ if [ "$MODE" = purge ]; then
   finish purge
 fi
 
-case $KIND in
-  absent)  TODO="installer (clone de $REPO_URL)" ;;
-  git)     TODO="mettre à jour (fetch + avance rapide)" ;;
-  copie)   TODO="remplacer la copie sans git par un clone (local/ conservé)" ;;
-  *)       TODO="mettre $DIR de côté ($DIR.previous-$STAMP) puis installer" ;;
-esac
-[ -n "$CLONE" ] && TODO="$TODO, à partir du clone $CLONE"
-if [ "$DRY" = 1 ]; then
-  if [ "$JSON" = 1 ]; then printf '{"module":"dotlib","action":"dry-run","a_faire":%s,"exit":%s}\n' "$(js "$TODO")" "$CODE"
-  else echo "à faire : $TODO"; fi
-  exit $CODE
-fi
-if [ "$YES" = 0 ]; then
-  printf 'À faire : %s. Continuer ? [o/N] ' "$TODO"; read -r a || a=
-  case $a in [oOyY]*) ;; *) echo "abandon, rien n'a été modifié"; exit 0 ;; esac
-fi
-
 # git manque : on dit COMMENT l'installer, selon le système. Rien de la bibliothèque n'est
 # chargeable ici (elle n'est pas encore posée), d'où ces quelques lignes autonomes.
 if ! command -v git >/dev/null 2>&1; then
@@ -220,6 +203,24 @@ if ! command -v git >/dev/null 2>&1; then
   esac
   fail "git absent sur cette machine : $hint" 7
 fi
+
+case $KIND in
+  absent)  TODO="installer (clone de $REPO_URL)" ;;
+  git)     TODO="mettre à jour (fetch + avance rapide)" ;;
+  copie)   TODO="remplacer la copie sans git par un clone (local/ conservé)" ;;
+  *)       TODO="mettre $DIR de côté ($DIR.previous-$STAMP) puis installer" ;;
+esac
+[ -n "$CLONE" ] && TODO="$TODO, à partir du clone $CLONE"
+if [ "$DRY" = 1 ]; then
+  if [ "$JSON" = 1 ]; then printf '{"module":"dotlib","action":"dry-run","a_faire":%s,"exit":%s}\n' "$(js "$TODO")" "$CODE"
+  else echo "à faire : $TODO"; fi
+  exit $CODE
+fi
+if [ "$YES" = 0 ]; then
+  printf 'À faire : %s. Continuer ? [o/N] ' "$TODO"; read -r a || a=
+  case $a in [oOyY]*) ;; *) echo "abandon, rien n'a été modifié"; exit 0 ;; esac
+fi
+
 lock
 # Restes d'une pose interrompue (on tient le verrou : ils ne sont à personne), sauf le clone fourni
 for d in "$DIR".tmp.*; do [ -d "$d" ] && [ "$d" != "$CLONE" ] && rm -rf "$d"; done
