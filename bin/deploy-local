@@ -72,7 +72,12 @@ case $POSED_BY in parc|shell) ;; *) echo "--posed-by : parc ou shell" >&2; exit 
 LOCK="$DIR.lock"
 STAMP=$(date +%Y%m%d-%H%M%S)
 say() { [ "$QUIET" = 1 ] || echo "dotlib : $*" >&2; }
-js() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\t' '  ')"; }
+# Toute valeur JSON est nettoyée AVANT échappement : séquences de couleur et caractères de contrôle
+# retirés. Un octet d'échappement non échappé rend le document invalide au sens strict, et un lecteur
+# rigoureux rejette alors le JSON ENTIER — donc tous les champs disparaissent, en silence. C'est arrivé
+# dans un dépôt voisin : une valeur colorée, et l'outil d'en face n'affichait plus rien sans dire pourquoi.
+js() { printf '"%s"' "$(printf '%s' "$1" | LC_ALL=C sed 's/'"$(printf '\033')"'\[[0-9;]*[A-Za-z]//g' \
+  | LC_ALL=C tr -d '\000-\010\013\014\016-\037' | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
 jb() { if [ "$1" = 1 ]; then printf true; else printf false; fi; }
 G() { git "$@" </dev/null; }
 
