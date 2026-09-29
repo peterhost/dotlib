@@ -191,8 +191,21 @@ parenthèse qui contient un NOM (`(tabular)`, `(MacVim)`, `(jq)`) ou un numéro 
 reste de la prose. Chaque cas de ce tableau a été **mesuré sur les vrais volets** des deux outils,
 et les erreurs relevées là sont devenues des cas de test : `/57` de « 57/57 », `/sombre` de
 « clair/sombre », `/..` de « cd ../.. », `-release` d'un numéro de version, `(ms)` d'une unité. Un test mesure cette
-sobriété sur un échantillon réel de 112 descriptions et **échoue au-delà d'un quart des caractères
-colorés** : sans ce plafond, rien n'empêcherait la grammaire de redevenir gourmande.
+sobriété, et il le fait sur **trois formes de contenu**, parce qu'un seul chiffre mentirait sur la
+moitié des cas :
+
+| forme | part peinte | plafond | ce que le chiffre veut dire |
+|---|---|---|---|
+| descriptions de raccourcis | 5 % | 25 % | la retenue sur de la prose |
+| volet à deux colonnes portant de la prose (état, commandes, journaux) | 22 % | 30 % | là où la gourmandise se verrait d'abord |
+| liste homogène sans prose (`nom␣␣␣␣état`, cinquante lignes) | 31 % | 45 % | la part du SUJET dans un tableau |
+
+**À quoi le plafond s'applique importe autant que sa valeur.** Sur une liste homogène, le sujet
+occupe la moitié de chaque ligne et rien ne le dilue : 31 % n'y est pas un texte trop peint, c'est
+un tableau, et le peindre ainsi est juste — le nom est ce que l'œil cherche. Qui mesurerait un tel
+volet avec le plafond de la prose croirait à une régression et « corrigerait » une grammaire qui a
+raison. Le plafond de 45 % y sert quand même : si une règle se mettait à peindre la colonne d'état
+avec le sujet, la part sauterait près de 100 %.
 
 **Une ligne qui porte déjà un repère (`==`, `✓`, `✗`, `!`) n'est pas recolorée** : son sens est dans
 sa couleur d'ensemble, et repeindre ses mots la lui ferait perdre.

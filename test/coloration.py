@@ -58,7 +58,18 @@ PAS_TERMES = [
     "      3  rc.d/15-history.sh",
     "  outils absents : fzf ruff pyright eslint",
 ]
-# Un volet aligné en deux colonnes, la forme la PLUS CHARGÉE — c'est là que le plafond doit mordre.
+# DEUX bancs, parce qu'un seul chiffre mentirait sur la moitié des cas (mesuré par la session vim sur
+# ses volets réels : descriptions 4,6 %, État 13,7 %, Commandes 21,3 %, Greffons 31,5 %).
+#
+# Le premier banc mesure la RETENUE DE LA GRAMMAIRE sur du texte qui porte de la prose. C'est là que
+# la gourmandise se voit : si une règle de trop se met à peindre des mots ordinaires, la part monte.
+#
+# Le second mesure une LISTE HOMOGÈNE SANS PROSE — cinquante lignes « nom␣␣␣␣état ». Sa part est haute
+# par nature : le sujet occupe la moitié de chaque ligne et rien ne le dilue. Ce n'est pas un texte
+# trop peint, c'est un tableau, et le peindre ainsi est JUSTE — le nom est ce que l'œil cherche. Le
+# plafond y sert quand même : si une règle se mettait à peindre la colonne d'état, la part sauterait
+# près de 100 %. Les deux plafonds disent donc chacun quelque chose de vrai, ce qu'un seul ne peut pas.
+# Un volet aligné en deux colonnes, la forme la plus chargée PARMI CELLES QUI PORTENT DE LA PROSE — c'est là que le plafond doit mordre.
 # Mesuré par la session vim sur ses propres onglets texte : 16,8 %, contre 5 % sur les descriptions.
 # Un plafond éprouvé sur le seul cas léger ne protège donc rien : une règle un peu gourmande de plus
 # ferait franchir la limite à ces volets-là pendant que les descriptions resteraient à 6 ou 7 %.
@@ -76,9 +87,6 @@ DEUX_COLONNES = [
     "      0  rc.d/00-platform.sh",
     "      3  rc.d/15-history.sh",
     "      0  lots/10-navigation.sh",
-    "  bufexplorer            installé",
-    "  markdown-preview.nvim  installé",
-    "  scss-syntax.vim        écarté",
     ":Keys                    l’aide des raccourcis, engendrée depuis le code (:Keys git pour un thème)",
     ":Theme                   choisir le thème et le fond (:Theme everforest light)",
     ":WatchForChangesAllFile  même surveillance, pour tous les fichiers ouverts",
@@ -96,6 +104,16 @@ PROSE = [
     "la sélection en minuscules, puis Capitalisées, puis MAJUSCULES",
     "vérifier les trois dépôts, puis rendre compte",
 ]
+
+
+# Une liste homogène : le cas de l'onglet des greffons de vim, cinquante-sept lignes de cette forme.
+TABLEAU = ["  %-22s %s" % (n, e) for n, e in (
+    ("LargeFile", "installé"), ("ale", "installé"), ("bufexplorer", "installé"),
+    ("catppuccin", "installé"), ("csv.vim", "installé"), ("ctrlp.vim", "installé"),
+    ("edge", "installé"), ("everforest", "installé"), ("friendly-snippets", "installé"),
+    ("fzf.vim", "installé"), ("golden-ratio", "installé"), ("goyo.vim", "installé"),
+    ("html5.vim", "installé"), ("limelight.vim", "installé"), ("markdown-preview.nvim", "installé"),
+    ("nerdcommenter", "installé"), ("nerdtree", "installé"), ("scss-syntax.vim", "écarté"))]
 
 
 def main():
@@ -183,8 +201,21 @@ def main():
     if part > 30:
         print("ÉCHEC : %.0f %% des caractères colorés dans un volet à deux colonnes — c'est le cas le "
               "plus chargé, et il franchit le plafond avant les descriptions" % part); return 1
-    print("  ok   coloration : %.0f %% peints sur un volet à deux colonnes, le cas le plus chargé "
+    print("  ok   coloration : %.0f %% peints sur un volet à deux colonnes portant de la prose "
           "(plafond 30 %%)" % part)
+
+    total = peints = 0
+    for l in TABLEAU:
+        for fragment, genre in module.decouper(l, (), True):
+            total += len(fragment)
+            if genre:
+                peints += len(fragment)
+    part = 100.0 * peints / max(1, total)
+    if part > 45:
+        print("ÉCHEC : %.0f %% dans une liste homogène sans prose — au-delà, ce n'est plus le sujet "
+              "qui est peint mais la colonne d'état avec lui" % part); return 1
+    print("  ok   coloration : %.0f %% peints dans une liste homogène sans prose, où la part est haute "
+          "par nature (plafond 45 %%)" % part)
     return 0
 
 
