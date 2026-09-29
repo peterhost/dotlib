@@ -25,3 +25,14 @@ pouvoir reprendre dotlib en lisant API.md, CLAUDE.md, ce journal et les tests.
   `~/.bash` et `~/.vim` codent et proposent. La gouvernance vit dans des fichiers (CLAUDE.md,
   API.md, ce journal, les tests), pas dans une conversation : un mainteneur qui s'évapore n'en
   est pas un.
+- **Le volet de contenu est coloré par le socle, et PEU** (29/09/2026). Demande du propriétaire :
+  « le blanc convient, mais il ne faut pas que TOUT soit blanc ». Le socle reconnaît lui-même, dans
+  chaque ligne, le sujet d'un volet aligné en deux colonnes, les séquences de touches, les commandes,
+  les chemins, les options et les variables ; le reste garde la couleur par défaut. C'est le socle
+  qui le fait, et non chaque appelant, pour que `brc ui` et `vrc ui` se ressemblent sans avoir à se
+  coordonner. La sobriété est une DÉCISION, pas un réglage : un volet entièrement coloré est aussi
+  illisible qu'un volet entièrement blanc, et un test échoue au-delà d'un quart des caractères peints
+  sur un échantillon réel — sans ce plafond, la grammaire redeviendrait gourmande au premier ajout.
+  **Une seule obligation pour les appelants : séparer les deux colonnes d'un volet aligné par au
+  moins deux espaces.** C'est le seul indice qui distingue un sujet d'une phrase, où les mots sont
+  séparés par un seul espace.
