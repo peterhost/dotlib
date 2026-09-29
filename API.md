@@ -9,6 +9,14 @@ préavis : ne l'utilisez pas, même si cela marche.
   `[ "${DOTLIB_API:-0}" -ge 1 ]` et utilise son propre repli sinon.
 - Dans une même version : on **ajoute** (fonction, variable, valeur), on ne **retire** ni ne
   **change le sens** de rien. Un changement incompatible fait passer à `DOTLIB_API=2`.
+- `DOTLIB_REVISION` est incrémenté à chaque AJOUT, l'API ne bougeant pas. Un appelant vérifie
+  `[ "${DOTLIB_REVISION:-1}" -ge 2 ]` avant d'employer une nouveauté. Côté shell, ce numéro compte
+  plus encore que côté Python : `dotlib_pill -p BAD x T` sur un dotlib ancien prend `-p` pour un nom
+  de couleur et rend une pastille fausse **sans lever d'erreur** — une dégradation silencieuse, qui ne
+  se voit qu'une fois déployée.
+
+      1 : API 1 d'origine
+      2 : `dotlib_utf8`, `dotlib_pill -p` et `-c`, arrondis par défaut, `share/palettes-sources.tsv`
 - Une valeur de réglage inconnue doit être traitée par l'appelant comme sa valeur par défaut :
   des valeurs peuvent s'ajouter.
 - `test/contract.sh` vérifie chaque point ci-dessous ; il doit passer avant toute publication.
@@ -51,9 +59,25 @@ Fonctions :
 - `dotlib_palette_load` → définit les variables ci-dessous. Profondeur : `DOTLIB_COLORS` (`0` `8` `256` `16m`)
   si l'appelant la fixe, sinon déduite de `TERM`, `COLORTERM` et `NO_COLOR`.
 - `dotlib_theme_set CLÉ VALEUR` → enregistre le réglage, recharge ; 2 si clé ou valeur inconnue.
-- `dotlib_pill COULEUR ICÔNE TEXTE` → `DOTLIB_PILL` : une pastille (icône sur fond coloré, texte sur fond
-  neutre), sans `\[ \]` (pas pour PS1). `COULEUR` : `BAD` `NOTE` `KEY` `NUM` `DATE`. Arrondis si
-  `DOTLIB_PILL_ROUND=1` (défaut : seulement si `DOTLIB_TERM=warp`). 8 couleurs : inversé ; sans couleur : `[TEXTE]`.
+- `dotlib_utf8` → 0 si le terminal accepte l'UTF-8, 1 sinon, d'après l'environnement (`LC_ALL`, sinon
+  `LC_CTYPE`, sinon `LANG` ; `TERM=linux` → non). **La règle n'existe qu'ici** : `tui.sh` y prend ses
+  glyphes et la pastille ses arrondis. Deux copies d'une même règle finissent par diverger.
+- `dotlib_pill [-p] [-c] COULEUR ICÔNE TEXTE` → `DOTLIB_PILL` : une pastille (icône sur fond coloré,
+  texte sur fond neutre). `COULEUR` : `BAD` `NOTE` `KEY` `NUM` `DATE`, ou `RRGGBB`/index 256.
+  8 couleurs : inversé ; sans couleur : `[TEXTE]`.
+  - **arrondis Powerline (U+E0B6/U+E0B4) par défaut** dès que le terminal peut les afficher : locale
+    UTF-8, pas la console. `DOTLIB_PILL_ROUND=0` les coupe, `=1` les force. Le défaut ne pouvait pas
+    dépendre de `DOTLIB_TERM=warp` : **en ssh, l'hôte ne sait pas à quel terminal il parle** et aucune
+    variable ne traverse ssh vers les NAS, alors que c'est le terminal qui AFFICHE qui dessine ces
+    glyphes — l'hôte distant n'a donc rien à savoir, et rien à installer. Un terminal dont la police
+    n'a pas ces glyphes montre des carrés : `DOTLIB_PILL_ROUND=0` dans son `local/` le règle.
+  - `-p` : pour une INVITE. Chaque suite de séquences est entourée de `\001` `\002`, afin que readline
+    ne les compte pas dans la largeur de la ligne. Ce sont bien `\001`/`\002` et non `\[ \]` : les
+    crochets ne sont interprétés que pendant l'expansion de `PS1` par bash, donc pas dans du texte
+    produit par une substitution de commande — le cas d'une pastille recalculée à chaque invite.
+    **Invariant garanti et testé : retirer les marqueurs rend exactement la pastille ordinaire.**
+  - `-c` : cœur clignotant (SGR 5), pour un état qu'on ne doit pas oublier. Certains terminaux
+    l'ignorent : c'est un renfort, jamais le seul signe.
 
 Variables (vides sans couleur) :
 

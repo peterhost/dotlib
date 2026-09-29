@@ -36,8 +36,9 @@ T_RESET=$C_RESET T_BOLD=$C_BOLD T_DIM=$C_DIM T_UL=$C_UL T_REV=$C_REV
 T_RED=$C_RED T_GREEN=$C_GREEN T_YELLOW=$C_YELLOW T_BLUE=$C_BLUE
 T_MAGENTA=$C_MAGENTA T_CYAN=$C_CYAN T_GREY=$C_GREY
 TUI_OK='✓' TUI_KO='✗' TUI_WARN='!' TUI_PTR='›'
-case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]*8*) ;; *) TUI_OK='+' TUI_KO='x' TUI_PTR='>' ;; esac
-[ "${TERM:-}" = linux ] && TUI_OK='+' TUI_KO='x' TUI_PTR='>'
+# La règle UTF-8 vient de palette.sh (dotlib_utf8), et n'est pas recopiée ici : elle l'était, et deux
+# copies d'une même règle finissent toujours par diverger — la pastille arrondie a besoin de la même.
+dotlib_utf8 || { TUI_OK='+' TUI_KO='x' TUI_PTR='>'; }
 
 tui_title() { printf '\n%s%s== %s ==%s\n' "$T_BOLD" "$T_CYAN" "$*" "$T_RESET"; }
 tui_info()  { printf '  %s\n' "$*"; }

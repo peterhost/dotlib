@@ -49,6 +49,51 @@ for b in /bin/bash /opt/homebrew/bin/bash /usr/bin/bash /usr/local/bin/bash /opt
   case $out in *"$E["*"texte"*"$E[0m") ok "bash $v · pastille en 256 couleurs" ;; *) ko "bash $v · pastille" "$out" ;; esac
   out=$(b_ "$b" dumb 'dotlib_palette_load; dotlib_pill BAD "!" "texte"; printf "%s" "$DOTLIB_PILL"')
   [ "$out" = "[texte]" ] && ok "bash $v · pastille sans couleur : [texte]" || ko "bash $v · pastille dumb" "$out"
+  # Les ARRONDIS powerline de la pastille. Par défaut dès que le terminal peut les afficher, et non
+  # plus « seulement sous Warp » : en ssh, l'hôte ne sait pas à quel terminal il parle (aucune variable
+  # ne traverse ssh vers les NAS), alors que c'est le terminal qui AFFICHE qui dessine ces glyphes.
+  # Les six combinaisons, parce que c'est un DÉFAUT et qu'un défaut se vérifie dans les deux sens.
+  # b_() passe par « env -i » : une variable posée AVANT l'appel n'arrive pas dans le shell testé.
+  # Mes deux premiers essais passaient pour cette mauvaise raison — le défaut mesuré était celui d'un
+  # environnement vide, pas celui qu'on croyait régler. On donne donc les variables à env, nommément.
+  PWL=$(printf '\356\202\266')        # U+E0B6 en UTF-8 (bash 3.2 ne connaît pas \u)
+  ronds() {   # ronds "VAR=VAL …" : vrai si la pastille porte les arrondis powerline
+    env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM=xterm-256color DOTLIB_DIR="$CLEAN" \
+      DOTLIB_THEME=dark $1 "$b" -c '. "$DOTLIB_DIR/lib/dotlib.sh"; dotlib_palette_load
+        dotlib_pill BAD "x" "t"; printf "%s" "$DOTLIB_PILL"' > "$TMP/pill" 2>&1
+    LC_ALL=C grep -q "$PWL" "$TMP/pill"; }
+  ronds "LANG=en_US.UTF-8" && ok "bash $v · pastille : arrondis par défaut en UTF-8" \
+    || ko "bash $v · pas d'arrondis alors que le terminal peut" "$(cat -v "$TMP/pill")"
+  ronds "LANG=en_US.UTF-8 DOTLIB_PILL_ROUND=0" && ko "bash $v · ROUND=0 n'a pas coupé les arrondis" \
+    || ok "bash $v · pastille : DOTLIB_PILL_ROUND=0 les coupe (police sans ces glyphes)"
+  ronds "LANG=C" && ko "bash $v · arrondis sous une locale non UTF-8" \
+    || ok "bash $v · pastille : pas d'arrondis sans UTF-8"
+  ronds "LANG=C DOTLIB_PILL_ROUND=1" && ok "bash $v · pastille : ROUND=1 force, même sans UTF-8" \
+    || ko "bash $v · ROUND=1 n'a pas forcé" "$(cat -v "$TMP/pill")"
+  ronds "LANG=en_US.UTF-8 DOTLIB_TERM=console" && ko "bash $v · arrondis sur la console" \
+    || ok "bash $v · pastille : pas d'arrondis sur la console"
+  # La forme PS1 : mêmes octets, chaque suite de séquences entourée de \001 \002. L'invariant est le
+  # bon test — RETIRER les marqueurs doit rendre EXACTEMENT la pastille ordinaire —, parce qu'il
+  # attrape à la fois un marqueur oublié et un marqueur posé autour d'un caractère qui s'affiche.
+  # Ce second cas est le pire : readline compterait une colonne de moins et l'invite se corromprait
+  # dès qu'on remonte dans l'historique, sans que rien ne paraisse à l'affichage initial.
+  out=$(env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM=xterm-256color DOTLIB_DIR="$CLEAN" \
+    DOTLIB_THEME=dark LANG=en_US.UTF-8 "$b" -c '. "$DOTLIB_DIR/lib/dotlib.sh"; dotlib_palette_load
+      dotlib_pill BAD "x" "T"; a=$DOTLIB_PILL
+      dotlib_pill -p BAD "x" "T"; b=$DOTLIB_PILL
+      case $b in *$'"'"'\001'"'"'*) ;; *) echo "pas de marqueur"; exit ;; esac
+      [ "$(printf %s "$b" | tr -d "\001\002")" = "$a" ] && echo identique || echo "diffère"')
+  [ "$out" = identique ] && ok "bash $v · pastille -p : marqueurs \001/\002 autour des séquences, et d'elles seules" \
+    || ko "bash $v · pastille -p" "$out"
+  out=$(b_ "$b" xterm-256color 'echo "$DOTLIB_API/$DOTLIB_REVISION"')
+  [ "$out" = "1/2" ] && ok "bash $v · DOTLIB_API et DOTLIB_REVISION annoncés" || ko "bash $v · version" "$out"
+  out=$(b_ "$b" xterm-256color 'dotlib_palette_load; dotlib_pill -p -c BAD "x" "T"
+      case $DOTLIB_PILL in *";5m"*) echo clignote ;; *) echo non ;; esac')
+  [ "$out" = clignote ] && ok "bash $v · pastille -c : cœur clignotant (SGR 5)" || ko "bash $v · pastille -c" "$out"
+  # … et la règle UTF-8 n'existe QU'À UN endroit : tui.sh doit prendre ses glyphes de la même.
+  out=$(b_ "$b" xterm-256color 'LC_ALL=C; . "$DOTLIB_DIR/lib/tui.sh" 2>/dev/null; printf "%s%s" "$TUI_OK" "$TUI_KO"')
+  [ "$out" = "+x" ] && ok "bash $v · tui.sh prend ses glyphes de dotlib_utf8, sans copie de la règle" \
+    || ko "bash $v · glyphes tui sous LC_ALL=C" "$out"
   rm -rf "$TMP/cfg"; mkdir -p "$TMP/cfg/lib"; cp "$ROOT"/lib/*.sh "$TMP/cfg/lib/"
   out=$(env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM=xterm-256color DOTLIB_DIR="$TMP/cfg" DOTLIB_THEME=dark "$b" -c '. "$DOTLIB_DIR/lib/dotlib.sh"
     dotlib_theme_set DOTLIB_PALETTE nord; echo "a=$? $DOTLIB_PALETTE_EFF"

@@ -24,6 +24,18 @@
 : "${DOTLIB_DIR:=$HOME/.dotlib}"
 DOTLIB_PALETTES='catppuccin gruvbox nord solarized tokyonight everforest edge lucius papercolor pencil xterm'
 
+# dotlib_utf8 : 0 si le terminal accepte l'UTF-8, 1 sinon. D'après l'ENVIRONNEMENT, et définie ICI
+# pour que tout ce dépôt s'appuie sur la même règle : lib/tui.sh choisissait ses glyphes avec une copie
+# de ce test, et deux parties d'une même bibliothèque ne peuvent pas se contredire là-dessus.
+# (La règle de onglets.utf8(), côté Python, écarte en plus « C.UTF-8 » : ce n'est pas une divergence,
+# c'est que CPython réécrit lui-même LC_CTYPE en C.UTF-8 quand la locale réelle était C. En shell,
+# « C.UTF-8 » veut dire ce qu'il dit.)
+dotlib_utf8() {
+  [ "${TERM:-}" = linux ] && return 1
+  case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]*8*) return 0 ;; esac
+  return 1
+}
+
 # _dotlib_depth : DOTLIB_COLORS d'après l'environnement, si l'appelant ne l'a pas fixé
 _dotlib_depth() {
   [ -n "${DOTLIB_COLORS:-}" ] && return
@@ -249,10 +261,23 @@ dotlib_palette_load() {
 }
 
 # --- Pastilles (style de la ligne de statut Claude : icône sur fond coloré, texte sur fond neutre) -----
-# dotlib_pill COULEUR ICÔNE TEXTE → DOTLIB_PILL (séquences prêtes à imprimer, sans \[ \] : pas pour PS1)
+# dotlib_pill [-p] [-c] COULEUR ICÔNE TEXTE → DOTLIB_PILL (séquences prêtes à imprimer)
+#   -p : pour une INVITE (PS1). Chaque suite de séquences est entourée de \001 \002, afin que readline
+#        ne compte pas ces octets dans la largeur de la ligne — sans quoi l'invite se corrompt dès
+#        qu'on édite ou qu'on remonte dans l'historique. Ce sont bien \001/\002 et non \[ \] : les
+#        crochets ne sont interprétés que pendant l'expansion de PS1 par bash, donc PAS dans du texte
+#        produit par une substitution de commande à l'intérieur de PS1 — le cas d'une pastille calculée
+#        à chaque invite. readline, lui, honore \001/\002 d'où qu'ils viennent.
+#   -c : cœur clignotant (SGR 5), pour un état qu'on ne doit pas oublier (une session incognito).
+#        Le clignotement est ignoré par certains terminaux : c'est un renfort, jamais le seul signe.
 #   COULEUR : un rôle (BAD NOTE KEY NUM DATE) de la palette courante, ou RRGGBB/idx256
-#   Arrondis powerline (U+E0B6/U+E0B4) seulement si DOTLIB_PILL_ROUND=1 (défaut : sous Warp, dont la
-#   police les a ; ailleurs, des espaces). 8 couleurs : [ texte ] inversé ; sans couleur : [texte].
+#   Arrondis powerline (U+E0B6/U+E0B4) PAR DÉFAUT dès que le terminal peut les afficher : 256 couleurs
+#   ou plus (les deux étages du dessous ne dessinent pas de pastille) ET locale UTF-8 ET pas la console.
+#   DOTLIB_PILL_ROUND=0 les coupe (terminal sans police adaptée : des carrés), =1 les force.
+#   Le défaut ne pouvait pas dépendre de DOTLIB_TERM=warp : en ssh, l'hôte ne sait pas à quel terminal
+#   il parle, et aucune variable ne traverse ssh vers les NAS. Or c'est le terminal qui AFFICHE qui
+#   dessine ces glyphes — donc l'hôte distant n'a rien à savoir, et rien à installer.
+#   8 couleurs : [ texte ] inversé ; sans couleur : [texte].
 _dotlib_pill_base() {   # fond neutre / texte / « creux » (texte sur la couleur) de la palette courante
   case ${DOTLIB_PALETTE:-catppuccin}:${DOTLIB_THEME_EFF:-dark} in
     catppuccin:dark)  _pb='313244/236 cdd6f4/189 11111b/233' ;;
@@ -280,9 +305,14 @@ _dotlib_pill_base() {   # fond neutre / texte / « creux » (texte sur la couleu
   esac
 }
 dotlib_pill() {
-  local c=$1 icon=$2 text=$3 _S _p _pb cs sf tx cr l= r= R=$'\e[0m'
+  local ps1=0 blink= A= B=
+  while :; do case ${1:-} in -p) ps1=1; shift ;; -c) blink=';5'; shift ;; *) break ;; esac; done
+  local c=$1 icon=$2 text=$3 _S _p _pb cs sf tx cr R=$'\e[0m'
+  [ "$ps1" = 1 ] && { A=$'\001'; B=$'\002'; }
   if [ "${DOTLIB_COLORS:-0}" = 0 ] || [ -n "${NO_COLOR:-}" ]; then DOTLIB_PILL="[$text]"; return; fi
-  if [ "$DOTLIB_COLORS" = 8 ]; then DOTLIB_PILL=$'\e[1;7;31m'" $icon $text "$R; return; fi
+  if [ "$DOTLIB_COLORS" = 8 ]; then
+    DOTLIB_PILL="$A"$'\e[1;7;31m'"$blink$B $icon $text $A$R$B"; return
+  fi
   _dotlib_palette_data                                     # _p : couleurs de rôle de la palette courante
   set -- $_p
   case $c in NUM) c=$1 ;; DATE) c=$2 ;; KEY) c=$6 ;; BAD) c=$8 ;; NOTE) c=$9 ;; esac
@@ -291,11 +321,18 @@ dotlib_pill() {
   _dotlib_sgr "$1" fond; sf=$_S; _dotlib_sgr "$1"; local sff=$_S
   _dotlib_sgr "$2"; tx=$_S; _dotlib_sgr "$3"; cr=$_S
   local round=${DOTLIB_PILL_ROUND:-}
-  [ -z "$round" ] && { round=0; [ "${DOTLIB_TERM:-}" = warp ] && round=1; }
+  if [ -z "$round" ]; then       # ici, DOTLIB_COLORS vaut 256 ou 16m : les autres cas sont déjà partis
+    round=1
+    dotlib_utf8 || round=0
+    [ "${DOTLIB_TERM:-}" = console ] && round=0
+  fi
+  # Séquence et glyphe séparés : avec -p, seule la séquence entre dans les marqueurs — le glyphe,
+  # lui, occupe une colonne et doit être compté.
+  local lsq lgl rsq rgl
   if [ "$round" = 1 ]; then        # U+E0B6 et U+E0B4 en UTF-8 (bash 3.2 ne connaît pas \u)
-    l=$'\e['"${cs}m"$'\xee\x82\xb6'; r=$R$'\e['"${sff}m"$'\xee\x82\xb4'
-  else l=$'\e['"${cb}m"' '; r=$'\e['"${sf}m"' '; fi
-  DOTLIB_PILL="$l"$'\e['"${cb};${cr}m$icon "$'\e['"${sf};${tx}m $text$r$R"
+    lsq=$'\e['"${cs}m"; lgl=$'\xee\x82\xb6'; rsq=$R$'\e['"${sff}m"; rgl=$'\xee\x82\xb4'
+  else lsq=$'\e['"${cb}m"; lgl=' '; rsq=$'\e['"${sf}m"; rgl=' '; fi
+  DOTLIB_PILL="$A$lsq$B$lgl$A"$'\e['"${cb};${cr}${blink}m$B$icon $A"$'\e['"${sf};${tx}m$B $text$A$rsq$B$rgl$A$R$B"
 }
 
 
