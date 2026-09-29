@@ -211,5 +211,19 @@ run "$H" --yes --json
 run "$H" --purge --yes --json
 [ ! -e "$H/.dotlib" ] && ok "--purge : tout effacé" || ko "purge ($RC)" "$OUT"
 
+# « à jour » et « impossible de savoir » ne sont pas la même chose. On coupe l'accès au dépôt par un
+# faux git : --check --remote doit répondre « reseau » (6), pas « ok » (0). Un appelant qui lit « ok »
+# conclurait qu'il n'a rien à faire, alors qu'il n'en sait rien.
+H="$TMP/injoignable"; mkdir -p "$H"
+run "$H" --yes --json >/dev/null 2>&1
+FAUXGIT=$TMP/fauxgit; mkdir -p "$FAUXGIT"
+printf '#!/bin/sh\ncase "$1" in ls-remote) exit 128 ;; esac\nexec %s "$@"\n' "$(command -v git)" > "$FAUXGIT/git"
+chmod 755 "$FAUXGIT/git"
+OUT=$(HOME="$H" PATH="$FAUXGIT:$PATH" sh "$ROOT/bin/deploy-local" --check --remote --json 2>&1); RC=$?
+[ $RC = 6 ] && [ "$(field "$OUT" "d['remote_vu']")" = False ] \
+  && ok "dépôt injoignable : « impossible de savoir » (6), pas « à jour »" || ko "injoignable ($RC)" "$OUT"
+OUT=$(HOME="$H" sh "$ROOT/bin/deploy-local" --check --json 2>&1); RC=$?
+[ $RC != 6 ] && ok "sans --remote : aucun accès au dépôt, aucun verdict sur le distant" || ko "sans --remote ($RC)" "$OUT"
+
 printf '\n%s%d réussis%s, %d échecs\n' "$G" "$PASS" "$N" "$FAIL"
 [ $FAIL -eq 0 ]
