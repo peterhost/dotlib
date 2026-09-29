@@ -42,6 +42,12 @@ CAS = [
     ("thème dark (vim n’en suit que le clair/sombre)", {}),               # ni « /sombre »
     ("........         = cd ../../..", {}),             # ni « /.. », et le terme n'est pas peint seul
     ("aligner le tableau markdown au fil de la frappe (jq)", {}),         # un OUTIL, pas une touche
+    # UNE LIGNE DE COMMANDE SE PEINT ENTIÈRE — c'est ce qu'on recopie, et c'était le cas manquant.
+    ("pstree     brew install pstree", {"brew install pstree": "commande"}),
+    ("1. arp-scan -l          (root)", {"arp-scan -l": "commande"}),       # mot technique + option
+    ("lancer  git clone https://exemple/x  puis relancer", {"git clone https://exemple/x": "commande"}),
+    ("terminal  warp · TERM=xterm-256color · couleurs 0", {"TERM=xterm-256color": "variable"}),
+    ("ouvrir tunnels.conf dans $EDITOR", {"tunnels.conf": "chemin", "$EDITOR": "variable"}),
 ]
 # Volets alignés en deux colonnes : le sujet de la ligne prend la couleur des commandes. Passé en
 # « terme=True », c'est-à-dire seulement sur la première ligne d'écran d'une entrée.
@@ -69,7 +75,8 @@ PAS_TERMES = [
 # trop peint, c'est un tableau, et le peindre ainsi est JUSTE — le nom est ce que l'œil cherche. Le
 # plafond y sert quand même : si une règle se mettait à peindre la colonne d'état, la part sauterait
 # près de 100 %. Les deux plafonds disent donc chacun quelque chose de vrai, ce qu'un seul ne peut pas.
-# Un volet aligné en deux colonnes, la forme la plus chargée PARMI CELLES QUI PORTENT DE LA PROSE — c'est là que le plafond doit mordre.
+# Un volet aligné en deux colonnes : la forme la plus chargée PARMI CELLES QUI PORTENT DE LA PROSE,
+# et donc celle où le plafond doit mordre en premier.
 # Mesuré par la session vim sur ses propres onglets texte : 16,8 %, contre 5 % sur les descriptions.
 # Un plafond éprouvé sur le seul cas léger ne protège donc rien : une règle un peu gourmande de plus
 # ferait franchir la limite à ces volets-là pendant que les descriptions resteraient à 6 ou 7 %.
@@ -93,6 +100,9 @@ DEUX_COLONNES = [
     "  ls               = $_brc_ls --color=auto -F",
     "  cdhome           = cd ~",
     "  ........         = cd ../../..",
+    "  pstree     absent     brew install pstree",
+    "  arp-scan   absent     sudo apt install arp-scan",
+    "  terminal  warp · TERM=xterm-256color · couleurs 0 · glyphes unicode",
 ]
 # De la prose, et seulement de la prose : rien ici ne doit prendre de couleur. Les parenthèses y sont
 # des noms (greffon, application, plateforme), pas des touches — c'est le piège de cette grammaire.
@@ -103,6 +113,15 @@ PROSE = [
     "fermer les buffers vides",
     "la sélection en minuscules, puis Capitalisées, puis MAJUSCULES",
     "vérifier les trois dépôts, puis rendre compte",
+]
+# Ce que la règle des invocations doit REFUSER. C'est la moitié fragile : une commande suivie de mots
+# ordinaires est une phrase, pas du code, et la peindre noierait le volet.
+PROSE += [
+    "Formats : tar, tar.gz/tgz, tar.bz2/tbz2, tar.zst, gz, bz2",           # « tar » sans argument
+    "machine      macOS 26.6.2   git 2.55.0",                              # une version, pas un appel
+    "Compatible bash 3.2 et plus : pas de tableaux associatifs",           # idem
+    "(root : via sudo si besoin)",                                          # « si » arrête la prose
+    "le processus lui-même et ses sous-processus sont exclus",
 ]
 
 
@@ -144,8 +163,10 @@ def main():
 
     # Le vocabulaire de l'appelant : sans lui, un nom de commande est de la prose ; avec lui, il prend
     # la couleur des commandes. Et il ne doit pas mordre sur un mot voisin.
+    # Un mot déclaré est peint, seul ou avec ses arguments — « brc doctor » est UNE invocation, pas
+    # deux mots —, et il ne mord pas sur un mot voisin qui le contient (« brcx »).
     m = dict((f, g) for f, g in module.decouper("vérifier avec brc doctor, sans brcx", ("brc", "doctor")) if g)
-    if m != {"brc": "commande", "doctor": "commande"}:
+    if m != {"brc doctor": "commande"}:
         print("ÉCHEC : vocabulaire de l'appelant : %r" % m); return 1
     if any(g for _, g in module.decouper("vérifier avec brc doctor")):
         print("ÉCHEC : sans vocabulaire, ces noms devraient rester de la prose"); return 1

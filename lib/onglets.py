@@ -40,7 +40,8 @@ API_COMPATIBLES = (1,)
 # TypeError, c'est-à-dire un défaut chez lui pour une insuffisance chez nous.
 #   1 : API 1 d'origine · 2 : genre « groupes » et `action` au contrat, et `comptes=`
 #   3 : coloration du volet de contenu — decouper(), Onglet(vocabulaire=)
-REVISION = 3
+#   4 : les lignes de commande peintes entières ; affectations et noms de fichiers
+REVISION = 4
 
 SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 AIDE = "←→ onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
@@ -73,7 +74,7 @@ def utf8():
     return "utf8" in lang.lower().replace("-", "")
 
 
-def palette_dotlib():
+def palette_dotlib(relire=False):
     """Les couleurs du thème actif du shell — celui que règle « brc theme ».
 
     dotlib publie ses palettes en DONNÉES (share/palettes.tsv : palette, fond, rôle, hexa, index
@@ -87,8 +88,13 @@ def palette_dotlib():
     (Note : l'interface du parc SSH, elle, n'utilise PAS de palette — décision du propriétaire, et elle ne
     dépendra jamais de dotlib puisque c'est elle qui sert à le poser.)"""
     dossier = os.environ.get("DOTLIB_DIR") or os.path.expanduser("~/.dotlib")
-    palette = os.environ.get("DOTLIB_PALETTE_EFF", "")
-    fond = os.environ.get("DOTLIB_THEME_EFF", "")
+    env_palette = os.environ.get("DOTLIB_PALETTE_EFF", "")
+    env_fond = os.environ.get("DOTLIB_THEME_EFF", "")
+    # `relire` : IGNORER l'environnement et croire le fichier. Les deux variables sont l'état du shell
+    # AU MOMENT OÙ IL A LANCÉ l'interface : elles ne bougent plus ensuite. Quand une action change le
+    # thème pendant que l'interface tourne, c'est donc le fichier qui dit la vérité et l'environnement
+    # qui mentirait — sans cela, appuyer sur Entrée sur un thème ne changeait rien à l'écran.
+    palette, fond = ("", "") if relire else (env_palette, env_fond)
     if not palette or not fond:
         try:
             with open(os.path.join(dossier, "local", "theme.conf"), encoding="utf-8") as f:
@@ -101,7 +107,9 @@ def palette_dotlib():
         except OSError:
             pass
     if fond not in ("dark", "light"):
-        fond = "dark"
+        # Le fichier peut dire « auto » : c'est le SHELL qui résout auto (il sait interroger le
+        # terminal), jamais nous. On retombe donc sur le fond qu'il avait résolu et exporté.
+        fond = env_fond if env_fond in ("dark", "light") else "dark"
     if not palette or palette in ("xterm", "actuel"):
         return {}                         # « les couleurs du terminal » : on n'y touche pas
     roles = {}
@@ -153,7 +161,16 @@ MOTIFS = (
     # Une option commence un mot : elle est précédée d'un blanc, d'une parenthèse, d'un « = » ou
     # d'une virgule, sinon de rien du tout. Mesuré : « bash 5.3.15(1)-release » donnait « -release ».
     ("option",   re.compile(r"(?<![^\s(=,])--?[A-Za-z][\w-]*")),      # --json, -v
+    # Un nom de fichier sans barre oblique : « tunnels.conf », « 00-platform.sh ». Liste d'extensions
+    # volontairement courte — celles d'un fichier qu'on ouvre ou qu'on édite. « tar.gz » et « .pdf »
+    # n'y sont pas : ils apparaissent dans de la prose qui parle de FORMATS, pas de fichiers.
+    ("chemin",   re.compile(r"(?<![\w/.])[\w][\w.\-]*\.(conf|cfg|ini|sh|bash|zsh|py|lua|vim|nvim"
+                           r"|json|ya?ml|tsv|csv|log|md|txt|rc)\b")),
     ("variable", re.compile(r"\$\{?\w+\}?")),                        # $EDITOR, ${HOME}
+    # Une affectation se peint avec sa valeur : « TERM=xterm-256color », « BRC_FORCE_COLOR=1 ». Le nom
+    # est exigé en MAJUSCULES — c'est la convention des variables d'environnement, et cela évite de
+    # prendre « --color=auto » (dont l'option est déjà peinte) ou un « x=y » de prose pour un réglage.
+    ("variable", re.compile(r"(?<![\w-])[A-Z][A-Z0-9_]*=[^\s,;)»\"']+")),
 )
 _PAREN = re.compile(r"\(([^()\s]{1,14})\)")
 # Le TERME défini, dans un volet aligné en deux colonnes — la forme dominante des onglets « texte » :
@@ -163,6 +180,109 @@ _PAREN = re.compile(r"\(([^()\s]{1,14})\)")
 # séparateur est l'alignement lui-même (deux espaces au moins), ce qui distingue un terme d'une
 # phrase, où les mots sont séparés par un seul espace. Le terme peut en contenir (« mise à jour »),
 # d'où la limite de longueur : au-delà, c'est de la prose et non une étiquette.
+# UNE LIGNE DE COMMANDE SE PEINT ENTIÈRE, commande et arguments. Demande du propriétaire, sur un cas
+# relevé dans un volet : « brew install pstree » n'était pas peint du tout, alors que c'est exactement
+# ce qu'on cherche des yeux pour le recopier. « Peindre peu, mais pas moins non plus. »
+#
+# Trois façons de reconnaître le DÉBUT d'une invocation, et pas une de plus :
+#   1. un mot du vocabulaire de l'appelant — il l'a déclaré, on lui fait confiance, même seul ;
+#   2. un nom de la liste ci-dessous, mais SEULEMENT s'il est suivi d'un argument. Sans cette
+#      exigence, « git 2.55.0 » d'une ligne de version se mettrait à ressembler à une commande ;
+#   3. un mot d'allure technique (il porte un tiret, un point, un souligné ou un chiffre) suivi d'une
+#      OPTION : « arp-scan -l ». Une option ne suit qu'une commande, c'est un indice sûr, et l'allure
+#      technique évite de prendre « sauf -S » pour une invocation.
+#
+# La liste ne cherche pas l'exhaustivité : ce sont les gestionnaires de paquets et la poignée d'outils
+# qui apparaissent dans un conseil d'installation ou de dépannage — là où un volet dit quoi taper.
+COMMANDES = frozenset("""
+brew port apt apt-get dpkg dnf yum pacman apk opkg ipkg synopkg pip pip3 pipx npm gem cargo
+sudo doas git ssh scp rsync tmux vim nvim nano make curl wget tar unzip chmod chown ln mkdir
+sh bash zsh python python3 perl awk sed grep defaults launchctl systemctl service
+""".split())
+
+# La prose s'arrête ici. Ces mots ne sont jamais l'argument d'une commande : sans cette barrière,
+# « via sudo si besoin » ferait de « si besoin » les arguments de sudo. C'est la seule façon simple de
+# distinguer une suite d'arguments d'une phrase, les deux étant faites de mots séparés par des espaces.
+BARRIERES = frozenset("""
+si et ou puis dans pour avec sans sauf sur sous par de du des le la les un une au aux en ne pas
+est sont via comme quand donc mais car ni que qui il elle on nous vous y ici plus moins tout tous
+ce ces son sa ses leur leurs cette autre autres meme seul aussi selon depuis vers chez entre
+""".split())
+_ARG = re.compile(r"[-<\[/~$A-Za-z0-9_.][\w.\-/=<>\[\]$~*?{}:,]*$")
+# Le PREMIER argument ne commence pas par un chiffre : « git 2.55.0 » est une version, pas une
+# invocation, et sans cette exigence toute ligne « outil version » se peindrait comme du code.
+_ARG1 = re.compile(r"[-<\[/~$A-Za-z_]")
+_OPTION_SEULE = re.compile(r"--?[A-Za-z][\w-]*$")
+_TECHNIQUE = re.compile(r"[a-z][a-z0-9_.+-]*$")
+FIN_DE_MEMBRE = ",;:)»\"'"
+DEBUT_DE_MEMBRE = "(«\"'"
+
+
+def _noyau(brut):
+    """Le mot sans la ponctuation qui l'entoure, et de combien on a rogné à gauche."""
+    gauche = len(brut) - len(brut.lstrip("(«\"'"))
+    return brut.strip("().,;:«»\"'…·"), gauche
+
+
+def _lignes_de_commande(texte, vocabulaire):
+    """Les intervalles (début, fin) des invocations trouvées dans le texte."""
+    mots = list(re.finditer(r"\S+", texte))
+    spans, i = [], 0
+    while i < len(mots):
+        noyau, rogne = _noyau(mots[i].group())
+        depart = mots[i].start() + rogne
+        declare = noyau in vocabulaire
+        suivant, _ = _noyau(mots[i + 1].group()) if i + 1 < len(mots) else ("", 0)
+        ouvre = False
+        if declare:
+            ouvre = True
+        elif (noyau in COMMANDES and suivant and suivant not in BARRIERES
+              and _ARG.match(suivant) and _ARG1.match(suivant)):
+            ouvre = True
+        elif (_TECHNIQUE.match(noyau) and re.search(r"[-_.0-9]", noyau)
+              and _OPTION_SEULE.match(suivant or "")):
+            ouvre = True
+        if not ouvre:
+            i += 1
+            continue
+        fin, j = mots[i].start() + rogne + len(noyau), i
+        # On étend tant que le mot suivant est un argument : pas un mot de la prose, pas un mot
+        # accentué (une commande et ses arguments sont en ASCII), et rien qui ferme le membre de phrase.
+        # Bornes larges à dessein : ce sont les BARRIÈRES (mot de prose, accent, ponctuation, deux
+        # espaces) qui arrêtent une invocation, pas un compte. Serrées, elles coupaient au milieu de
+        # « ssh -f -N -o ExitOnForwardFailure=yes … » et laissaient un îlot de couleur — pire que rien.
+        while j + 1 < len(mots) and j - i < 12 and fin - depart < 90:
+            # Le caractère qui SUIT le mot, et non son dernier : c'est la virgule après « tar » qui
+            # dit que le membre de phrase est fini, et elle est hors du mot.
+            if fin < len(texte) and texte[fin] in FIN_DE_MEMBRE:
+                break
+            brut = mots[j + 1].group()
+            if brut[:1] in DEBUT_DE_MEMBRE:
+                break
+            # Deux espaces et plus : c'est le séparateur de colonnes d'un volet aligné, donc la
+            # frontière entre ce qu'on tape et son explication. Une invocation ne la franchit jamais.
+            if mots[j + 1].start() - fin >= 2:
+                break
+            arg, _ = _noyau(brut)
+            if not arg or arg in BARRIERES:
+                break
+            try:
+                arg.encode("ascii")
+            except UnicodeEncodeError:
+                break
+            if not _ARG.match(arg):
+                break
+            j += 1
+            fin = mots[j].start() + len(brut.rstrip(",;:)»\"'…·"))
+        # Un nom de la liste générique n'est peint que s'il a VRAIMENT reçu un argument : sans cela,
+        # « Formats : tar, tar.gz… » peignait « tar » tout seul au milieu d'une phrase. Un mot du
+        # vocabulaire, lui, est peint seul — l'appelant l'a déclaré comme une commande de son monde.
+        if (declare and fin > depart) or j > i:
+            spans.append((depart, fin))
+        i = max(j + 1, i + 1)
+    return spans
+
+
 _TERME = re.compile(r"[ \t]*(\S[^\t]{0,31}?)[ \t]{2,}\S")
 
 
@@ -208,6 +328,12 @@ def decouper(texte, vocabulaire=(), terme=False):
         # module qui est le sujet. Peindre le nombre inverserait l'information.
         if m and not m.group(1).strip("0123456789.,:").strip() == "":
             trouves.append((m.start(1), m.end(1), "terme"))
+    # Après le sujet (qui prime : dans « tunnel edit   ouvrir… », ce qui est à gauche est le sujet
+    # avant d'être une invocation), avant les motifs (une invocation se peint ENTIÈRE, on ne veut pas
+    # que « --port » y forme un îlot d'une autre couleur).
+    for debut, fin in _lignes_de_commande(texte, set(vocabulaire)):
+        if libre(debut, fin):
+            trouves.append((debut, fin, "commande"))
 
     for m in _PAREN.finditer(texte):
         contenu = m.group(1)
@@ -364,7 +490,7 @@ class Interface:
         self.h_trait, self.v_trait = ("─", "│") if self.utf8 else ("-", "|")
 
     # --- couleurs : celles de base du terminal, seulement s'il en a assez ; sinon monochrome ----------
-    def couleurs(self):
+    def couleurs(self, relire=False):
         """TROIS étages : la palette du shell (256 couleurs et tous les rôles présents), les couleurs
         de base du terminal, puis le monochrome. Les gardes du dernier étage ne sont pas
         décoratives : un NAS sous DSM rapporte COLORS=0 malgré des terminfo présents, et
@@ -392,7 +518,7 @@ class Interface:
         # la portée un chemin grisé, le mauvais un « bad », l'onglet une date
         corresp = (("titre", "note"), ("touche", "key"), ("portee", "path"),
                    ("mauvais", "bad"), ("onglet", "date"), ("commande", "num"))
-        palette = palette_dotlib()
+        palette = palette_dotlib(relire)
         if palette and getattr(curses, "COLORS", 8) >= 256 and all(r in palette for _, r in corresp):
             for i, (nom, role) in enumerate(corresp, start=1):
                 try:
@@ -768,7 +894,7 @@ class Interface:
             self.message = o.action(nom) or ""
             # une action peut CHANGER le thème du shell : sans cela, le nouveau réglage ne se verrait
             # qu'à la réouverture de l'interface
-            self.couleurs()
+            self.couleurs(True)
         except Exception as e:
             self.message = "échec : %s" % e
         rang = o.rang

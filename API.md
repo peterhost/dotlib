@@ -107,6 +107,7 @@ construisez sans elle.
     1 : API 1 d'origine
     2 : genre « groupes » et `action` au contrat, paramètre `comptes=`
     3 : coloration du volet de contenu — `decouper()`, `Onglet(vocabulaire=)`
+    4 : les lignes de commande se peignent entières ; affectations et noms de fichiers reconnus
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
@@ -132,7 +133,11 @@ testent — l'un d'eux n'a aucune copie de repli.
   - `genre="texte"` : `produire()` → liste de lignes ;
   - `genre="groupes"` : `produire()` → `[(nom, [lignes]), …]` — les noms à gauche, les lignes du
     choisi à droite. `action(nom)` facultative, appelée par Entrée, rend un message ; l'onglet est
-    rechargé et **les couleurs relues** (une action peut changer le thème du shell).
+    rechargé et **les couleurs relues à partir du FICHIER de réglage**, en ignorant
+    `DOTLIB_PALETTE_EFF` et `DOTLIB_THEME_EFF` : ces variables sont l'état du shell au moment où il a
+    lancé l'interface et ne bougent plus ensuite, si bien qu'appuyer sur Entrée sur un thème ne
+    changeait rien à l'écran. Si le fichier dit « auto », le fond résolu par le shell est conservé —
+    c'est lui qui sait interroger le terminal, jamais ce module.
   - `genre="raccourcis"` : `produire()` → `{"entrees": [[source, thème, touches, description,
     portée], …], "themes": [ordre de référence]}`. Les thèmes présents sont rangés selon `themes`,
     les autres à la suite. **Les colonnes au-delà de la cinquième sont ignorées** : n'en ajoutez pas
@@ -177,11 +182,12 @@ n'est pas de la prose est reconnu et coloré selon un rôle de la palette du she
 | ce qui est reconnu | exemples | rôle de palette |
 |---|---|---|
 | le sujet d'une ligne alignée en deux colonnes (séparateur : deux espaces ou plus) | `dépôt`, `mise à jour`, `LargeFile`, `:Theme` | `num` |
+| une invocation, commande ET arguments, peinte d'un seul tenant | `brew install pstree`, `arp-scan -l`, `git clone …`, `brc doctor` | `num` |
 | séquence de touches entre parenthèses, ou touche « leader » | `(,h)`, `(Ctrl-x)`, `(Dp)`, `(Entrée)`, `,ev` | `key` — la même que la colonne des touches |
 | commande Ex, ou code entre accents graves, ou mot du `vocabulaire` | `:Keys`, `` `git status` ``, `brc` | `num` |
-| chemin | `~/.bashrc`, `/etc/profile` | `path` |
+| chemin, ou nom de fichier à extension connue | `~/.bashrc`, `/etc/profile`, `tunnels.conf` | `path` |
 | option | `--json`, `-v` | `date` |
-| variable du shell | `$EDITOR`, `${HOME}` | `note` |
+| variable du shell, ou affectation avec sa valeur | `$EDITOR`, `${HOME}`, `TERM=xterm-256color` | `note` |
 | tout le reste | la prose | couleur par défaut du terminal |
 
 Le principe est de **peindre peu** : la couleur ne vaut que par contraste avec de la prose qui n'en a
@@ -209,6 +215,16 @@ avec le sujet, la part sauterait près de 100 %.
 
 **Une ligne qui porte déjà un repère (`==`, `✓`, `✗`, `!`) n'est pas recolorée** : son sens est dans
 sa couleur d'ensemble, et repeindre ses mots la lui ferait perdre.
+
+**Une invocation se peint entière** — commande et arguments d'un seul tenant, parce que c'est ce
+qu'on recopie : un îlot de couleur au milieu d'une commande est pire que pas de couleur du tout.
+Trois façons de la reconnaître, et pas une de plus : un mot de votre `vocabulaire` (même seul) ; un
+nom de la petite liste `COMMANDES` — gestionnaires de paquets et outils qui apparaissent dans un
+conseil d'installation — mais seulement s'il reçoit un vrai argument, sinon « git 2.55.0 » se
+mettrait à ressembler à du code ; un mot d'allure technique suivi d'une option (`arp-scan -l`),
+parce qu'une option ne suit qu'une commande. Elle s'arrête à un mot de prose, à un mot accentué, à
+une ponctuation qui ferme le membre de phrase, et **au séparateur de deux espaces d'un volet
+aligné** : ce qu'on tape ne déborde jamais sur son explication.
 
 **Deux limites connues, qu'il vaut mieux garder que corriger.** Dans « aussi -b et 'b », `-b` est
 peint comme une option alors que c'est une touche, et `'b` n'est pas peint : deux touches voisines,
