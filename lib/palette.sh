@@ -311,7 +311,9 @@ dotlib_pill() {
   [ "$ps1" = 1 ] && { A=$'\001'; B=$'\002'; }
   if [ "${DOTLIB_COLORS:-0}" = 0 ] || [ -n "${NO_COLOR:-}" ]; then DOTLIB_PILL="[$text]"; return; fi
   if [ "$DOTLIB_COLORS" = 8 ]; then
-    DOTLIB_PILL="$A"$'\e[1;7;31m'"$blink$B $icon $text $A$R$B"; return
+    # « $blink » va DANS la séquence, avant le « m » : collé après, il s'affichait en texte (« ;5 »)
+    # et, avec -p, il était compté comme invisible — l'invite se décalait alors de deux colonnes.
+    DOTLIB_PILL="$A"$'\e[1;7;31'"$blink"'m'"$B $icon $text $A$R$B"; return
   fi
   _dotlib_palette_data                                     # _p : couleurs de rôle de la palette courante
   set -- $_p

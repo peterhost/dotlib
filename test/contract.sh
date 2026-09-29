@@ -85,6 +85,32 @@ for b in /bin/bash /opt/homebrew/bin/bash /usr/bin/bash /usr/local/bin/bash /opt
       [ "$(printf %s "$b" | tr -d "\001\002")" = "$a" ] && echo identique || echo "diffère"')
   [ "$out" = identique ] && ok "bash $v · pastille -p : marqueurs \001/\002 autour des séquences, et d'elles seules" \
     || ko "bash $v · pastille -p" "$out"
+  # LE TEXTE VISIBLE d'une pastille ne contient que l'icône et le texte. Assertion générale, et non
+  # un rendu attendu au caractère près : ce qui casse, c'est un morceau de séquence d'échappement qui
+  # fuit dans le visible. Avec une icône « x » et un texte « T », aucun chiffre ni point-virgule ne
+  # doit subsister une fois les séquences retirées. Défaut trouvé ainsi : le « ;5 » de -c était collé
+  # APRÈS le « m » en 8 couleurs, donc affiché — et, avec -p, compté comme invisible par readline,
+  # ce qui décalait l'invite de deux colonnes sans que rien ne paraisse à l'affichage initial.
+  bon=1
+  for prof in 0 8 256; do
+    for opt in "" "-c" "-p" "-p -c"; do
+      vis=$(env -i HOME="$TMP/h" PATH=/usr/bin:/bin TERM=xterm-256color DOTLIB_DIR="$CLEAN" \
+        DOTLIB_THEME=dark LANG=en_US.UTF-8 DOTLIB_COLORS=$prof "$b" -c \
+        ". \"\$DOTLIB_DIR/lib/dotlib.sh\"; dotlib_palette_load; dotlib_pill $opt BAD x T
+         printf %s \"\$DOTLIB_PILL\"" | LC_ALL=C tr -d '\001\002' | LC_ALL=C sed 's/'"$E"'\[[0-9;]*m//g')
+      case $vis in *[0-9';']*)
+        ko "bash $v · pastille $prof couleurs « $opt » : un morceau de séquence reste visible" \
+           "$(printf %s "$vis" | cat -v)"; bon=0; break 2 ;;
+      esac
+      # sans couleur, le contrat dit « [TEXTE] » : pas d'icône, rien à colorer pour la porter
+      if [ "$prof" = 0 ]; then attendu="[T]"; else attendu=x; fi
+      case $vis in *"$attendu"*) ;; *)
+        ko "bash $v · pastille $prof couleurs « $opt » : attendu « $attendu »" "$(printf %s "$vis" | cat -v)"
+        bon=0; break 2 ;;
+      esac
+    done
+  done
+  [ "$bon" = 1 ] && ok "bash $v · pastille : rien que l'icône et le texte de visible (3 profondeurs × 4 formes)"
   out=$(b_ "$b" xterm-256color 'echo "$DOTLIB_API/$DOTLIB_REVISION"')
   [ "$out" = "1/2" ] && ok "bash $v · DOTLIB_API et DOTLIB_REVISION annoncés" || ko "bash $v · version" "$out"
   out=$(b_ "$b" xterm-256color 'dotlib_palette_load; dotlib_pill -p -c BAD "x" "T"
