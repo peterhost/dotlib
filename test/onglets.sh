@@ -61,6 +61,13 @@ case $out in *bash*Espace*|*Espace*bash*) ok "raccourcis : colonne source affich
 out=$(lance '2q' TERM=vt100 LANG=en_US.UTF-8)
 case $out in *"2 Groupes"*alpha*CODE=0*) ok "sans couleurs (vt100) : rendu lisible, sortie propre" ;; *) ko "vt100" "$(printf '%s' "$out" | tail -4)" ;; esac
 printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "vt100 : des couleurs ont été émises" || ok "sans couleurs : aucune séquence de couleur émise"
+# … et pas davantage de GRAS à la place : attr() promeut deux rôles en gras en monochrome, pour que
+# les repères de LIGNE restent lisibles. Appliqué à un mot dans une phrase, ce repli mettrait en gras
+# toutes les options et toutes les variables d'un volet. Sans couleurs, la coloration ne fait rien.
+out2=$(lance '1q' TERM=vt100 LANG=en_US.UTF-8)
+ligne=$(printf '%s' "$out2" | LC_ALL=C grep -a 'pose dans' | head -1)
+case $ligne in *"$E["*) ko "sans couleurs : la ligne colorée porte encore un attribut" "$(printf '%s' "$ligne" | cat -v)" ;;
+               *) ok "sans couleurs : la ligne colorée ne porte aucun attribut, pas même le gras" ;; esac
 
 # 5 bis. La coloration du volet de contenu : des couleurs ENTRENT dans la ligne, et la ligne reste
 # intacte une fois les couleurs retirées. Le second point est le vrai : placer des fragments l'un

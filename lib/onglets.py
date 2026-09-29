@@ -439,7 +439,11 @@ class Interface:
         for fragment, genre in decouper(texte, vocabulaire, terme):
             if not self.utf8:
                 fragment = ascii_lisible(fragment)      # avant de compter : « … » vaut trois colonnes
-            attr = self.attr(self.GENRES[genre]) if genre else 0
+            # Les PAIRES, et non attr() : celle-ci promeut « titre » et « onglet » en gras quand il
+            # n'y a pas de couleurs, pour que les repères de ligne restent lisibles. Sur un mot au
+            # milieu d'une phrase, ce repli mettrait en gras chaque option et chaque variable d'un
+            # volet entier. Sans couleurs, la coloration ne doit RIEN faire du tout.
+            attr = self.paires.get(self.GENRES[genre], 0) if genre else 0
             if segments and segments[-1][2] == attr:    # recoller ce qui a la même couleur
                 x0, avant, _ = segments[-1]
                 segments[-1] = (x0, avant + fragment, attr)
