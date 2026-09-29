@@ -114,6 +114,9 @@ testent — l'un d'eux n'a aucune copie de repli.
   PREMIÈRE ouverture de l'onglet et gardé (`r` recharge). Une exception d'un producteur n'emporte
   pas l'interface : l'onglet affiche « illisible ».
   - `genre="texte"` : `produire()` → liste de lignes ;
+  - `genre="groupes"` : `produire()` → `[(nom, [lignes]), …]` — les noms à gauche, les lignes du
+    choisi à droite. `action(nom)` facultative, appelée par Entrée, rend un message ; l'onglet est
+    rechargé et **les couleurs relues** (une action peut changer le thème du shell).
   - `genre="raccourcis"` : `produire()` → `{"entrees": [[source, thème, touches, description,
     portée], …], "themes": [ordre de référence]}`. Les thèmes présents sont rangés selon `themes`,
     les autres à la suite. **Les colonnes au-delà de la cinquième sont ignorées** : n'en ajoutez pas
@@ -158,9 +161,12 @@ l'efface) · Entrée (action) · `r` recharger · `q` quitter.
 
 ### Hors contrat, expérimental
 
-Le genre `groupes`, le paramètre `action`, et `lire_tsv()` : utilisables, mais NON garantis tant
-qu'un appelant ne les a pas éprouvés sur une vraie machine. On ne grave pas une intention. Les
-faire entrer au contrat plus tard sera un AJOUT, donc toujours l'API 1.
+`lire_tsv()` : utilisable, mais non garanti — aucun appelant ne s'en sert. On ne garde pas un nom
+dont personne n'a besoin.
+
+(Le genre `groupes` et `action` sont entrés au contrat le 29/09, après avoir tourné dans
+`brc interface` sur une vraie machine. C'est la règle : on ne grave pas une intention, on grave ce
+qui a été éprouvé. Leur entrée est un AJOUT, donc toujours l'API 1.)
 
 ### Obtenir et mettre à jour dotlib
 
