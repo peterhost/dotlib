@@ -45,6 +45,7 @@ CAS = [
     # UNE LIGNE DE COMMANDE SE PEINT ENTIÈRE — c'est ce qu'on recopie, et c'était le cas manquant.
     ("pstree     brew install pstree", {"brew install pstree": "commande"}),
     ("1. arp-scan -l          (root)", {"arp-scan -l": "commande"}),       # mot technique + option
+    ("  arp-scan   absent     sudo apt install arp-scan", {"sudo apt install arp-scan": "commande"}),
     ("lancer  git clone https://exemple/x  puis relancer", {"git clone https://exemple/x": "commande"}),
     ("terminal  warp · TERM=xterm-256color · couleurs 0", {"TERM=xterm-256color": "variable"}),
     ("ouvrir tunnels.conf dans $EDITOR", {"tunnels.conf": "chemin", "$EDITOR": "variable"}),
@@ -124,6 +125,9 @@ PROSE += [
     "Compatible bash 3.2 et plus : pas de tableaux associatifs",           # idem
     "(root : via sudo si besoin)",                                          # « si » arrête la prose
     "le processus lui-même et ses sous-processus sont exclus",
+    # Relevés à l'écran sur du contenu neuf — les deux faux positifs les plus instructifs.
+    "écarté    inutile ici : vim fournit déjà cette syntaxe",   # « vim » est aussi un mot de phrase
+    "54 installé(s), 3 écarté(s) sur cette machine",            # « (s) » est un pluriel, pas une touche
 ]
 
 

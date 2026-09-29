@@ -220,8 +220,12 @@ sa couleur d'ensemble, et repeindre ses mots la lui ferait perdre.
 qu'on recopie : un îlot de couleur au milieu d'une commande est pire que pas de couleur du tout.
 Trois façons de la reconnaître, et pas une de plus : un mot de votre `vocabulaire` (même seul) ; un
 nom de la petite liste `COMMANDES` — gestionnaires de paquets et outils qui apparaissent dans un
-conseil d'installation — mais seulement s'il reçoit un vrai argument, sinon « git 2.55.0 » se
-mettrait à ressembler à du code ; un mot d'allure technique suivi d'une option (`arp-scan -l`),
+conseil d'installation —, mais seulement s'il reçoit un **vrai** argument : une option, un chemin,
+ou un verbe d'action (`install`, `clone`, `update`…). Sans cette exigence, « git 2.55.0 » se mettait
+à ressembler à du code, et « vim fournit déjà cette syntaxe » à une invocation — car `vim`, `port`,
+`make` ou `go` sont autant des mots de phrase que des commandes. `sudo` est transparent : c'est la
+commande qui le suit qui décide. Troisième ouverture : un mot d'allure technique suivi d'une option
+(`arp-scan -l`),
 parce qu'une option ne suit qu'une commande. Elle s'arrête à un mot de prose, à un mot accentué, à
 une ponctuation qui ferme le membre de phrase, et **au séparateur de deux espaces d'un volet
 aligné** : ce qu'on tape ne déborde jamais sur son explication.

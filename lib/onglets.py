@@ -172,7 +172,10 @@ MOTIFS = (
     # prendre « --color=auto » (dont l'option est déjà peinte) ou un « x=y » de prose pour un réglage.
     ("variable", re.compile(r"(?<![\w-])[A-Z][A-Z0-9_]*=[^\s,;)»\"']+")),
 )
-_PAREN = re.compile(r"\(([^()\s]{1,14})\)")
+# La parenthèse doit être PRÉCÉDÉE D'UN BLANC. Sans cela, le « (s) » de « 54 installé(s) » passait
+# pour la touche « s » — une marque de pluriel collée au mot, pas quelque chose qu'on tape. Dans les
+# vraies descriptions, une touche entre parenthèses suit toujours un espace : « le curseur (,h) ».
+_PAREN = re.compile(r"(?:(?<=\s)|(?<=^))\(([^()\s]{1,14})\)")
 # Le TERME défini, dans un volet aligné en deux colonnes — la forme dominante des onglets « texte » :
 #   « dépôt        ~/.vim   branche master »   « LargeFile              installé »
 #   « :Keys        l'aide des raccourcis »     « mise à jour  aucune trace »
@@ -200,6 +203,18 @@ sudo doas git ssh scp rsync tmux vim nvim nano make curl wget tar unzip chmod ch
 sh bash zsh python python3 perl awk sed grep defaults launchctl systemctl service
 """.split())
 
+# Ce qui suit un nom de la liste générique doit RESSEMBLER À UN ARGUMENT, faute de quoi la commande
+# n'en est pas une. Défaut relevé sur une vraie ligne : « vim fournit déjà cette syntaxe » se peignait
+# comme une invocation, parce que « fournit » a la forme d'un argument. Or « vim » est autant un mot
+# de phrase qu'une commande — comme « port », « service », « make » ou « go ». On exige donc que le
+# premier argument soit une option, un chemin, ou l'un de ces verbes : ce sont eux qui font qu'une
+# suite de mots est un ordre et non une phrase.
+VERBES = frozenset("""
+install reinstall uninstall add remove rm purge update upgrade refresh search list info show
+clone pull push fetch checkout commit status diff log init tap link unlink
+run start stop restart reload enable disable config set get doctor clean build test
+""".split())
+
 # La prose s'arrête ici. Ces mots ne sont jamais l'argument d'une commande : sans cette barrière,
 # « via sudo si besoin » ferait de « si besoin » les arguments de sudo. C'est la seule façon simple de
 # distinguer une suite d'arguments d'une phrase, les deux étant faites de mots séparés par des espaces.
@@ -224,6 +239,13 @@ def _noyau(brut):
     return brut.strip("().,;:«»\"'…·"), gauche
 
 
+def _argument_vrai(mot):
+    """Le premier mot après une commande de la liste : option, chemin, ou verbe d'action."""
+    if _OPTION_SEULE.match(mot) or mot in VERBES:
+        return True
+    return "/" in mot or mot.startswith(("~", "$")) or bool(re.search(r"\.[a-z]{1,5}$", mot))
+
+
 def _lignes_de_commande(texte, vocabulaire):
     """Les intervalles (début, fin) des invocations trouvées dans le texte."""
     mots = list(re.finditer(r"\S+", texte))
@@ -232,12 +254,21 @@ def _lignes_de_commande(texte, vocabulaire):
         noyau, rogne = _noyau(mots[i].group())
         depart = mots[i].start() + rogne
         declare = noyau in vocabulaire
+        if noyau in ("sudo", "doas") and i + 2 < len(mots):
+            # transparents : « sudo apt install x » se juge sur « apt install », pas sur « sudo apt »
+            apres, _ = _noyau(mots[i + 2].group())
+            if _noyau(mots[i + 1].group())[0] in COMMANDES and _argument_vrai(apres):
+                spans_sudo = True
+            else:
+                spans_sudo = False
+        else:
+            spans_sudo = False
         suivant, _ = _noyau(mots[i + 1].group()) if i + 1 < len(mots) else ("", 0)
         ouvre = False
-        if declare:
+        if declare or spans_sudo:
             ouvre = True
         elif (noyau in COMMANDES and suivant and suivant not in BARRIERES
-              and _ARG.match(suivant) and _ARG1.match(suivant)):
+              and _ARG.match(suivant) and _ARG1.match(suivant) and _argument_vrai(suivant)):
             ouvre = True
         elif (_TECHNIQUE.match(noyau) and re.search(r"[-_.0-9]", noyau)
               and _OPTION_SEULE.match(suivant or "")):
