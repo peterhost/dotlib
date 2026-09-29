@@ -111,9 +111,12 @@ detect() {
   done
   LOCK_STALE=0
   [ -d "$LOCK" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ] && LOCK_STALE=1
-  REMOTE_COMMIT=
+  # « à jour » et « impossible de savoir » ne sont pas la même chose : quand on nous demande de
+  # consulter le dépôt et qu'il est injoignable, le dire, au lieu de répondre que tout va bien.
+  REMOTE_COMMIT=; REMOTE_VU=0
   if [ "$REMOTE" = 1 ] && [ "$KIND" = git ]; then
     REMOTE_COMMIT=$(G ls-remote "${ORIGIN:-$REPO_URL}" "refs/heads/$BRANCH" 2>/dev/null | cut -c1-7)
+    [ -n "$REMOTE_COMMIT" ] && REMOTE_VU=1
   fi
   # Statut et code
   STATUS=ok; CODE=0; WHY=
@@ -128,15 +131,19 @@ detect() {
       want=${EXPECT:-$REMOTE_COMMIT}
       if [ -n "$want" ] && [ -n "$COMMIT" ]; then
         case $want in "$COMMIT"*|"${COMMIT%???}"*) ;; *) case $COMMIT in "$want"*) ;; *) STATUS=maj; CODE=5; WHY="$COMMIT ≠ $want" ;; esac ;; esac
+      elif [ "$REMOTE" = 1 ] && [ "$REMOTE_VU" = 0 ]; then
+        # « à jour » et « impossible de savoir » ne sont pas la même chose : on nous a demandé de
+        # consulter le dépôt, il est injoignable, on le DIT au lieu de répondre que tout va bien.
+        STATUS=reseau; CODE=6; WHY="dépôt injoignable : impossible de savoir s'il y a plus récent"
       fi
     fi
   fi
 }
 
 state_json() {
-  printf '{"module":"dotlib","installed":%s,"kind":%s,"status":%s,"why":%s,"dir":%s,"commit":%s,"expected_commit":%s,"remote_commit":%s,"origin":%s,"shallow":%s,"local_changes":%s,"api":%s,"posed_by":%s,"posed_at":%s,"leftovers":%s,"lock_stale":%s,"git":%s,"exit":%s}' \
+  printf '{"module":"dotlib","installed":%s,"kind":%s,"status":%s,"why":%s,"dir":%s,"commit":%s,"expected_commit":%s,"remote_commit":%s,"remote_vu":%s,"origin":%s,"shallow":%s,"local_changes":%s,"api":%s,"posed_by":%s,"posed_at":%s,"leftovers":%s,"lock_stale":%s,"git":%s,"exit":%s}' \
     "$(jb "$INSTALLED")" "$(js "$KIND")" "$(js "$STATUS")" "$(js "$WHY")" "$(js "$DIR")" "$(js "$COMMIT")" \
-    "$(js "$EXPECT")" "$(js "$REMOTE_COMMIT")" "$(js "$ORIGIN")" "$(jb "$SHALLOW")" "$(jb "$DIRTY")" "$(js "$API")" \
+    "$(js "$EXPECT")" "$(js "$REMOTE_COMMIT")" "$(jb "$REMOTE_VU")" "$(js "$ORIGIN")" "$(jb "$SHALLOW")" "$(jb "$DIRTY")" "$(js "$API")" \
     "$(js "$PB")" "$(js "$PDATE")" "$(js "${LEFTOVERS# }")" "$(jb "$LOCK_STALE")" \
     "$(js "$(git --version 2>/dev/null | sed 's/^git version //')")" "$CODE"
 }
