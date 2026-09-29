@@ -48,6 +48,8 @@ CAS = [
     ("lancer  git clone https://exemple/x  puis relancer", {"git clone https://exemple/x": "commande"}),
     ("terminal  warp · TERM=xterm-256color · couleurs 0", {"TERM=xterm-256color": "variable"}),
     ("ouvrir tunnels.conf dans $EDITOR", {"tunnels.conf": "chemin", "$EDITOR": "variable"}),
+    # « tout » est un mot de la prose : il arrête l’invocation au lieu d’en devenir l’argument.
+    ("tout ajouter : git add tout puis valider", {"git add": "commande"}),
 ]
 # Volets alignés en deux colonnes : le sujet de la ligne prend la couleur des commandes. Passé en
 # « terme=True », c'est-à-dire seulement sur la première ligne d'écran d'une entrée.
@@ -170,6 +172,10 @@ def main():
         print("ÉCHEC : vocabulaire de l'appelant : %r" % m); return 1
     if any(g for _, g in module.decouper("vérifier avec brc doctor")):
         print("ÉCHEC : sans vocabulaire, ces noms devraient rester de la prose"); return 1
+    # Le point final appartient à la phrase, pas à la commande — vu à l'écran sur « brc reload. ».
+    m = dict((f, g) for f, g in module.decouper("les autres shells le prennent à leur brc reload.", ("brc",)) if g)
+    if m != {"brc reload": "commande"}:
+        print("ÉCHEC : le point final a été avalé par la commande : %r" % m); return 1
     print("  ok   coloration : vocabulaire de l'appelant pris en compte, et lui seul")
 
     for ligne, attendu in TERMES:

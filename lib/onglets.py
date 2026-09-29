@@ -273,7 +273,12 @@ def _lignes_de_commande(texte, vocabulaire):
             if not _ARG.match(arg):
                 break
             j += 1
-            fin = mots[j].start() + len(brut.rstrip(",;:)»\"'…·"))
+            coupe = brut.rstrip(",;:)»\"'…·")
+            # Le point final d'une phrase n'appartient pas à la commande : « leur brc reload. »
+            # peignait le point avec, ce qui se voyait à l'écran.
+            if len(coupe) > 1 and coupe.endswith("."):
+                coupe = coupe[:-1]
+            fin = mots[j].start() + len(coupe)
         # Un nom de la liste générique n'est peint que s'il a VRAIMENT reçu un argument : sans cela,
         # « Formats : tar, tar.gz… » peignait « tar » tout seul au milieu d'une phrase. Un mot du
         # vocabulaire, lui, est peint seul — l'appelant l'a déclaré comme une commande de son monde.
