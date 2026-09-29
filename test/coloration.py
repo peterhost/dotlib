@@ -58,6 +58,34 @@ PAS_TERMES = [
     "      3  rc.d/15-history.sh",
     "  outils absents : fzf ruff pyright eslint",
 ]
+# Un volet aligné en deux colonnes, la forme la PLUS CHARGÉE — c'est là que le plafond doit mordre.
+# Mesuré par la session vim sur ses propres onglets texte : 16,8 %, contre 5 % sur les descriptions.
+# Un plafond éprouvé sur le seul cas léger ne protège donc rien : une règle un peu gourmande de plus
+# ferait franchir la limite à ces volets-là pendant que les descriptions resteraient à 6 ou 7 %.
+DEUX_COLONNES = [
+    "== Configuration ==",
+    "  dépôt        ~/.vim   branche master, commit 80295b3",
+    "  éditeur      9.1 (Normal), niveau full   /usr/bin/vim",
+    "  machine      macOS 26.6.2   git 2.55.0",
+    "  greffons     57/57 installés",
+    "  thème        everforest dark   fichier, thème dark (n’en suit que le clair/sombre)",
+    "  mise à jour  aucune trace",
+    "  ✓ aucun reste",
+    "  outils absents : fzf ruff pyright eslint prettier typescript-language-server",
+    "Modules chargés (ms)",
+    "      0  rc.d/00-platform.sh",
+    "      3  rc.d/15-history.sh",
+    "      0  lots/10-navigation.sh",
+    "  bufexplorer            installé",
+    "  markdown-preview.nvim  installé",
+    "  scss-syntax.vim        écarté",
+    ":Keys                    l’aide des raccourcis, engendrée depuis le code (:Keys git pour un thème)",
+    ":Theme                   choisir le thème et le fond (:Theme everforest light)",
+    ":WatchForChangesAllFile  même surveillance, pour tous les fichiers ouverts",
+    "  ls               = $_brc_ls --color=auto -F",
+    "  cdhome           = cd ~",
+    "  ........         = cd ../../..",
+]
 # De la prose, et seulement de la prose : rien ici ne doit prendre de couleur. Les parenthèses y sont
 # des noms (greffon, application, plateforme), pas des touches — c'est le piège de cette grammaire.
 PROSE = [
@@ -144,6 +172,19 @@ def main():
               "le volet redevient illisible" % (part, lignes)); return 1
     print("  ok   coloration : %.0f %% des caractères peints sur %d vraies descriptions (plafond 25 %%)"
           % (part, lignes))
+
+    total = peints = 0
+    for l in DEUX_COLONNES:
+        for fragment, genre in module.decouper(l, (), True):
+            total += len(fragment)
+            if genre:
+                peints += len(fragment)
+    part = 100.0 * peints / max(1, total)
+    if part > 30:
+        print("ÉCHEC : %.0f %% des caractères colorés dans un volet à deux colonnes — c'est le cas le "
+              "plus chargé, et il franchit le plafond avant les descriptions" % part); return 1
+    print("  ok   coloration : %.0f %% peints sur un volet à deux colonnes, le cas le plus chargé "
+          "(plafond 30 %%)" % part)
     return 0
 
 

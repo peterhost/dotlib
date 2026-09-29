@@ -197,6 +197,14 @@ colorés** : sans ce plafond, rien n'empêcherait la grammaire de redevenir gour
 **Une ligne qui porte déjà un repère (`==`, `✓`, `✗`, `!`) n'est pas recolorée** : son sens est dans
 sa couleur d'ensemble, et repeindre ses mots la lui ferait perdre.
 
+**Deux limites connues, qu'il vaut mieux garder que corriger.** Dans « aussi -b et 'b », `-b` est
+peint comme une option alors que c'est une touche, et `'b` n'est pas peint : deux touches voisines,
+deux traitements, aucun juste. C'est indécidable hors contexte, et toute règle qui rattraperait `-b`
+repeindrait de vraies options — l'erreur deviendrait plus fréquente et plus trompeuse que celle-là.
+De même, un sujet de plus de 32 caractères (`:WatchForChangesWhileInThisBuffer`) perd le rôle
+« terme » ; s'il commence par `:` il reste peint comme une commande, et le résultat est juste à
+l'œil. Ce ne sont pas des défauts à réparer : ce sont des cas où le remède coûte plus que le mal.
+
 Pour que le sujet d'une ligne soit reconnu, **séparez les deux colonnes par au moins deux espaces**
 (`"  %-16s  %s"`, et non `"  %-16s %s"` : un seul espace, sur un nom qui remplit la colonne, ne
 laisse aucun séparateur). C'est la seule chose à faire côté appelant, et elle vaut pour les deux
