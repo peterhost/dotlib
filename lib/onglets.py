@@ -42,7 +42,30 @@ API_COMPATIBLES = (1,)
 #   3 : coloration du volet de contenu — decouper(), Onglet(vocabulaire=)
 #   4 : les lignes de commande peintes entières ; affectations et noms de fichiers
 #   5 : aperçu d'un groupe dans une autre palette, filet « --- », sources_palette()
-REVISION = 5
+#   6 : Quitter(valeur) — sortir de l'interface avec une valeur, code 5, onglets.QUITTE
+REVISION = 6
+
+class Quitter(Exception):
+    """Lever ceci depuis une action FERME l'interface et rend le code 5, avec une valeur pour l'appelant.
+
+    Pourquoi c'est au socle de le fournir : certaines choses ne peuvent se faire qu'une fois le terminal
+    rendu. « tmux attach » en est le cas d'école — curses tient le terminal, donc une action ne peut pas
+    s'y substituer. Le socle n'exécute RIEN : il sort proprement et rapporte ce que l'action a dit.
+
+    Une EXCEPTION et non une valeur de retour, à dessein : une action rend déjà un message, et un objet
+    rendu à sa place se confondrait avec lui. Levée, l'intention est sans ambiguïté et fonctionne aussi
+    depuis une fonction appelée par l'action. Elle traverse tous les filets de ce module — ceux qui
+    empêchent un onglet cassé de fermer l'interface ne doivent pas avaler un ordre de sortie.
+    """
+
+    def __init__(self, valeur=""):
+        Exception.__init__(self, valeur)
+        self.valeur = valeur
+
+
+# Valeur de la dernière sortie par Quitter, ou None. Remise à None à CHAQUE lancer() : une valeur
+# laissée là par une séance précédente serait lue comme neuve, et une mesure périmée est un souvenir.
+QUITTE = None
 
 SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 AIDE = "←→ onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
@@ -911,6 +934,8 @@ class Interface:
             return None, None
         try:
             bloc = o.apercu(groupe) or {}
+        except Quitter:
+            raise
         except Exception:                      # un producteur d'aperçu ne fait pas tomber l'onglet
             return None, None
         if not bloc.get("lignes"):
@@ -1020,6 +1045,8 @@ class Interface:
             self.ecran.refresh()
             try:
                 o.charger()
+            except Quitter:
+                raise
             except Exception as e:                   # un producteur cassé ne ferme pas tout
                 o.contenu = ["onglet illisible : %s" % e]
             self.ecran.erase()
@@ -1031,6 +1058,8 @@ class Interface:
                 self.dessiner_groupes(o, haut, hauteur, l)
             else:
                 self.dessiner_texte(o, haut, hauteur, l)
+        except Quitter:
+            raise
         except Exception as e:                       # un onglet cassé ne ferme pas l'interface
             self.ecrire(haut + 1, 2, "onglet illisible : %s" % e, self.attr("mauvais"))
         self.pied()
@@ -1112,6 +1141,8 @@ class Interface:
             # une action peut CHANGER le thème du shell : sans cela, le nouveau réglage ne se verrait
             # qu'à la réouverture de l'interface
             self.couleurs(True)
+        except Quitter:
+            raise                        # un ordre de sortie n'est pas un échec d'action
         except Exception as e:
             self.message = "échec : %s" % e
         rang = o.rang
@@ -1201,7 +1232,13 @@ def lancer(onglets, nom=""):
     """Ouvre l'interface ; ne lève jamais d'exception de terminal. Renvoie 0 à la sortie (q) ; 4 sans terminal
     (entrée ou sortie qui n'en est pas un) ou si curses ne peut pas démarrer, avec un message d'une ligne sur la
     sortie d'erreur, préfixé par `nom` : l'appelant affiche alors son contenu à la suite, en texte. Le terminal
-    est toujours rendu (curses.wrapper), y compris si un onglet lève une exception."""
+    est toujours rendu (curses.wrapper), y compris si un onglet lève une exception.
+
+    5 si une action a levé Quitter : le terminal est rendu, et onglets.QUITTE porte la valeur donnée.
+    L'appelant fait alors ce qui ne peut se faire qu'hors de curses (attacher une session, par
+    exemple) ; ce module n'exécute rien."""
+    global QUITTE
+    QUITTE = None                        # jamais la valeur d'une séance précédente
     if not onglets or not sys.stdin.isatty() or not sys.stdout.isatty():
         print("%s : pas de terminal pour l'interface" % (nom or "interface"), file=sys.stderr)
         return 4
@@ -1234,6 +1271,9 @@ def lancer(onglets, nom=""):
 
     try:
         curses.wrapper(demarrer)
+    except Quitter as q:                 # avant le filet général : c'est un ordre, pas une panne
+        QUITTE = q.valeur
+        return 5
     except curses.error as e:
         print("%s : terminal trop limité pour l'interface (%s)" % (nom or "interface", e), file=sys.stderr)
         return 4

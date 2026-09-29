@@ -133,6 +133,7 @@ construisez sans elle.
     3 : coloration du volet de contenu — `decouper()`, `Onglet(vocabulaire=)`
     4 : les lignes de commande se peignent entières ; affectations et noms de fichiers reconnus
     5 : `Onglet(apercu=)`, repère `---`, `sources_palette()`
+    6 : `Quitter(valeur)` — sortir de l'interface avec une valeur, code 5, `onglets.QUITTE`
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
@@ -142,6 +143,20 @@ testent — l'un d'eux n'a aucune copie de repli.
 
 ### Ce qui est garanti
 
+- `onglets.Quitter(valeur)` — exception à LEVER depuis une action pour fermer l'interface et rendre la
+  main avec une valeur. `lancer()` rend alors **`5`**, le terminal est rendu, et `onglets.QUITTE` porte
+  la valeur. **Le module n'exécute rien** : il sort proprement et rapporte.
+  - à quoi cela sert : certaines choses ne peuvent se faire qu'une fois le terminal rendu. `tmux
+    attach` en est le cas d'école — curses tient le terminal, donc aucune action ne peut s'y
+    substituer. L'appelant, lui, le peut après le retour de `lancer()` ;
+  - une **exception** et non une valeur de retour : une action rend déjà un message, et un objet rendu
+    à sa place se confondrait avec lui. Levée, l'intention est sans ambiguïté, et elle fonctionne aussi
+    depuis une fonction appelée par l'action ;
+  - **elle traverse tous les filets** de ce module. Ceux qui empêchent un onglet cassé de fermer
+    l'interface (« onglet illisible ») avaleraient sinon un ordre de sortie, et l'interface resterait
+    ouverte en affichant une erreur — un test le vérifie, y compris depuis un producteur ;
+  - `onglets.QUITTE` est remis à `None` à **chaque** `lancer()` : une valeur laissée par une séance
+    précédente serait lue comme neuve.
 - `onglets.lancer(onglets, nom="")` → `0` à la sortie ; `4` si l'entrée ou la sortie n'est pas un terminal,
   ou si curses ne démarre pas, avec une ligne « `nom` : … » sur la sortie d'erreur (l'appelant
   affiche alors son contenu à la suite). Jamais d'exception de terminal ; le terminal est toujours

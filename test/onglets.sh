@@ -150,6 +150,63 @@ out=$(lance_a 'q' TERM=vt100 LANG=en_US.UTF-8)
 printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "aperçu vt100 : des couleurs émises" \
   || ok "aperçu : sans couleurs, rien n'est peint plutôt qu'une palette fausse"
 
+# 5 quater. SORTIR AVEC UNE VALEUR : certaines choses ne peuvent se faire qu'une fois le terminal
+# rendu — attacher une session tmux en est le cas d'école, puisque curses tient le terminal. Une action
+# lève Quitter(valeur) ; l'interface se ferme, rend 5, et l'appelant lit onglets.QUITTE. Le socle
+# n'exécute rien.
+cat > "$TMP/sortir.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+def act(nom):
+    raise onglets.Quitter("session-" + nom)
+o = [onglets.Onglet("S", lambda: [("alpha", ["x"])], genre="groupes", action=act)]
+code = onglets.lancer(o, "sortir")
+print("CODE=%d VALEUR=%r" % (code, onglets.QUITTE))
+P
+out=$(( sleep 1.2; printf '\t\n'; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin \
+  ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=en_US.UTF-8 \
+  script -q /dev/null sh -c "$PY \"$TMP/sortir.py\"" 2>&1 | tr -d '\r')
+case $out in *"CODE=5 VALEUR='session-alpha'"*) ok "sortir : Quitter ferme l'interface, code 5, valeur rendue à l'appelant" ;;
+             *Traceback*) ko "sortir : Quitter a échappé jusqu'à l'appelant" "$(printf '%s' "$out" | tail -4)" ;;
+             *) ko "sortir : ni code 5 ni valeur" "$(printf '%s' "$out" | tail -4)" ;; esac
+# … et une SECONDE séance ne doit pas voir la valeur de la première : une mesure périmée est un souvenir.
+cat > "$TMP/deux.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+o = [onglets.Onglet("S", lambda: [("alpha", ["x"])], genre="groupes",
+                    action=lambda n: (_ for _ in ()).throw(onglets.Quitter("un")))]
+onglets.lancer(o, "sortir")
+p = [onglets.Onglet("T", lambda: ["rien"])]          # séance sans action : QUITTE doit repasser à None
+print("CODE=%d VALEUR=%r" % (onglets.lancer(p, "sortir"), onglets.QUITTE))
+P
+out=$(( sleep 1.2; printf '\t\n'; sleep 2.5; printf 'q'; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin \
+  ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=en_US.UTF-8 \
+  script -q /dev/null sh -c "$PY \"$TMP/deux.py\"" 2>&1 | tr -d '\r')
+case $out in *"CODE=0 VALEUR=None"*) ok "sortir : QUITTE est remis à None à chaque lancer(), jamais une valeur périmée" ;;
+             *) ko "sortir : valeur périmée entre deux séances" "$(printf '%s' "$out" | tail -4)" ;; esac
+# Le point qui compte : Quitter ne doit être avalé par AUCUN des filets qui protègent l'interface.
+# Ici, c'est un PRODUCTEUR qui lève — le filet « onglet illisible » l'attraperait sans précaution.
+cat > "$TMP/prod.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+def produire():
+    raise onglets.Quitter("depuis-un-producteur")
+code = onglets.lancer([onglets.Onglet("P", produire)], "sortir")
+print("CODE=%d VALEUR=%r" % (code, onglets.QUITTE))
+P
+out=$(( sleep 2; printf 'q'; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin \
+  ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=en_US.UTF-8 \
+  script -q /dev/null sh -c "$PY \"$TMP/prod.py\"" 2>&1 | tr -d '\r')
+case $out in *"CODE=5 VALEUR='depuis-un-producteur'"*) ok "sortir : un ordre de sortie n'est avalé par aucun filet, même levé par un producteur" ;;
+             *illisible*) ko "sortir : le filet « onglet illisible » a avalé l'ordre de sortie" "$(printf '%s' "$out" | tail -4)" ;;
+             *) ko "sortir depuis un producteur" "$(printf '%s' "$out" | tail -4)" ;; esac
+
 # 6. Locale non UTF-8 : cadres en ASCII, pas de caractères semi-graphiques
 out=$( ( sleep 1.2; printf q; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=C LC_ALL=C \
        script -q /dev/null sh -c "$PY \"$TMP/essai.py\"; echo CODE=\$?" 2>&1 | LC_ALL=C tr -d '\r')
