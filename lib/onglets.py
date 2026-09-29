@@ -236,12 +236,23 @@ DEBUT_DE_MEMBRE = "(«\"'"
 def _noyau(brut):
     """Le mot sans la ponctuation qui l'entoure, et de combien on a rogné à gauche."""
     gauche = len(brut) - len(brut.lstrip("(«\"'"))
-    return brut.strip("().,;:«»\"'…·"), gauche
+    reste = brut[gauche:]
+    # Le « : » initial d'une commande Ex fait partie du mot : il n'est pas de la ponctuation, et le
+    # retirer faisait de « :Theme » un « Theme » que plus rien ne distinguait d'un nom quelconque.
+    prefixe = ""
+    if reste[:1] == ":" and reste[1:2].isalpha():
+        prefixe, reste = ":", reste[1:]
+    return prefixe + reste.strip("().,;:«»\"'…·"), gauche
 
 
 def _argument_vrai(mot):
-    """Le premier mot après une commande de la liste : option, chemin, ou verbe d'action."""
+    """Le premier mot après une commande : option, paramètre à remplacer, chemin, ou verbe d'action.
+
+    Volontairement exigeant : c'est lui qui distingue un ordre d'une phrase. « vim fournit » n'en a
+    pas, « brew install » en a un."""
     if _OPTION_SEULE.match(mot) or mot in VERBES:
+        return True
+    if mot[:1] in "<[" and mot[-1:] in ">]":       # <nom>, [options] — un paramètre à remplacer
         return True
     return "/" in mot or mot.startswith(("~", "$")) or bool(re.search(r"\.[a-z]{1,5}$", mot))
 
@@ -265,7 +276,13 @@ def _lignes_de_commande(texte, vocabulaire):
             spans_sudo = False
         suivant, _ = _noyau(mots[i + 1].group()) if i + 1 < len(mots) else ("", 0)
         ouvre = False
+        ex = noyau[:1] == ":" and len(noyau) > 1 and noyau[1].isalpha()
         if declare or spans_sudo:
+            ouvre = True
+        # Une commande Ex emmène ses PARAMÈTRES : « :Theme <nom> <fond> » peignait la commande et
+        # laissait ses paramètres en blanc, soit l'îlot qu'on veut éviter. Même exigence que pour les
+        # autres — un vrai argument —, sans quoi « tapez :Keys puis choisissez » se peindrait.
+        elif ex and suivant and suivant not in BARRIERES and _argument_vrai(suivant):
             ouvre = True
         elif (noyau in COMMANDES and suivant and suivant not in BARRIERES
               and _ARG.match(suivant) and _ARG1.match(suivant) and _argument_vrai(suivant)):

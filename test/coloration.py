@@ -46,6 +46,10 @@ CAS = [
     ("pstree     brew install pstree", {"brew install pstree": "commande"}),
     ("1. arp-scan -l          (root)", {"arp-scan -l": "commande"}),       # mot technique + option
     ("  arp-scan   absent     sudo apt install arp-scan", {"sudo apt install arp-scan": "commande"}),
+    # Une commande Ex emmène ses paramètres : sinon la commande est peinte et ses paramètres non,
+    # ce qui est l'îlot qu'on veut éviter. Mais elle s'arrête devant la prose (cas suivant).
+    ("dans vim : :Theme <nom> <fond> pour un choix durable", {":Theme <nom> <fond>": "commande"}),
+    ("tapez :Keys puis choisissez un thème", {":Keys": "commande"}),       # … et s'arrête à la prose
     ("lancer  git clone https://exemple/x  puis relancer", {"git clone https://exemple/x": "commande"}),
     ("terminal  warp · TERM=xterm-256color · couleurs 0", {"TERM=xterm-256color": "variable"}),
     ("ouvrir tunnels.conf dans $EDITOR", {"tunnels.conf": "chemin", "$EDITOR": "variable"}),
@@ -139,6 +143,14 @@ TABLEAU = ["  %-22s %s" % (n, e) for n, e in (
     ("fzf.vim", "installé"), ("golden-ratio", "installé"), ("goyo.vim", "installé"),
     ("html5.vim", "installé"), ("limelight.vim", "installé"), ("markdown-preview.nvim", "installé"),
     ("nerdcommenter", "installé"), ("nerdtree", "installé"), ("scss-syntax.vim", "écarté"))]
+# Et la forme la plus dense qui existe chez nous, relevée dans le volet d'état du shell : une durée
+# et un chemin, où le chemin est TOUT le contenu de la ligne. 49 % mesurés sur le volet réel — d'où
+# un plafond calibré au-dessus, faute de quoi il accuserait une grammaire qui a raison.
+TABLEAU += ["      %d  %s" % (d, f) for d, f in (
+    (0, "rc.d/00-platform.sh"), (1, "rc.d/01-path.sh"), (0, "rc.d/02-terminal.sh"),
+    (3, "rc.d/15-history.sh"), (0, "rc.d/20-colors.sh"), (37, "rc.d/30-completion.sh"),
+    (0, "lots/00-helpers.sh"), (0, "lots/45-ssh.sh"), (0, "lots/70-packages-brew.sh"),
+    (0, "lots/78-interface.sh"), (7, "rc.d/50-lots.sh"), (0, "os/darwin/warp.sh"))]
 
 
 def main():
@@ -242,11 +254,11 @@ def main():
             if genre:
                 peints += len(fragment)
     part = 100.0 * peints / max(1, total)
-    if part > 45:
+    if part > 55:
         print("ÉCHEC : %.0f %% dans une liste homogène sans prose — au-delà, ce n'est plus le sujet "
               "qui est peint mais la colonne d'état avec lui" % part); return 1
     print("  ok   coloration : %.0f %% peints dans une liste homogène sans prose, où la part est haute "
-          "par nature (plafond 45 %%)" % part)
+          "par nature (plafond 55 %%)" % part)
     return 0
 
 
