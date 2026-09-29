@@ -102,7 +102,8 @@ import onglets
 def groupes():
     return [("nord", ["detail ~/.chemin-du-detail"]), ("gruvbox", ["autre"])]
 def apercu(nom):
-    return {"lignes": ["== demonstration", "chemin ~/.chemin-de-demo", "---", "prose ordinaire"],
+    return {"lignes": ["== demonstration", "chemin ~/.chemin-de-demo", "---", "prose ordinaire",
+                       "une ligne longue " * 9 + "FIN-DE-LIGNE-LONGUE"],
             "palette": nom, "theme": "dark", "match": os.environ.get("ESSAI_MATCH") or None}
 o = [onglets.Onglet("T", groupes, genre="groupes", apercu=apercu,
                     action=lambda n: "pose %s" % n)]
@@ -128,6 +129,10 @@ printf '%s' "$out" | LC_ALL=C grep -q "38;5;103m~/\.chemin-du-detail" \
   || ko "le contenu a changé de palette" "$(printf '%s' "$out" | LC_ALL=C grep -ao '38;5;[0-9]*m~/[a-z.-]*' | sort -u)"
 cmp -s "$TMP/local/theme.conf" "$TMP/theme.temoin" && ok "aperçu : le réglage n'a pas été touché" \
   || ko "l'aperçu a modifié theme.conf"
+# Une ligne longue se REPLIE dans l'aperçu au lieu d'être coupée au bord : une démonstration tronquée
+# montre une couleur sans montrer ce qu'elle qualifie, et le texte disparaissait en silence.
+case $out in *FIN-DE-LIGNE-LONGUE*) ok "aperçu : une ligne longue se replie, rien n'est perdu au bord" ;;
+             *) ko "aperçu : ligne longue tronquée" "$(printf '%s' "$out" | tail -4)" ;; esac
 # Les CORRESPONDANCES (« fond coloré » / « texte gras ») : un réglage qui ne se voit que sur une
 # surbrillance. Le montrer sur la ligne sélectionnée est le seul endroit où ces couleurs servent
 # vraiment ; ailleurs, on inventerait une surbrillance pour l'occasion.

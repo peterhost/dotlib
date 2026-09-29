@@ -205,7 +205,10 @@ Garanties, dans l'ordre où elles comptent :
   où les couleurs de correspondance servent pour de vrai ; les montrer ailleurs obligerait à
   inventer une surbrillance pour l'occasion ;
 - une fenêtre trop courte (moins de six lignes de contenu) n'affiche pas d'aperçu plutôt que de
-  couper le volet en deux ; un producteur d'aperçu qui lève ne fait pas tomber l'onglet.
+  couper le volet en deux ; un producteur d'aperçu qui lève ne fait pas tomber l'onglet ;
+- **les lignes se replient**, elles ne sont pas coupées au bord : une démonstration tronquée montre
+  une couleur sans montrer ce qu'elle qualifie. Le bloc est borné en lignes d'ÉCRAN — la moitié de la
+  hauteur disponible au plus —, donc une ligne longue coûte plusieurs lignes du bloc.
 
 **Les plafonds de sobriété mesurés plus bas sont ceux du banc d'essai de ce dépôt, pas une contrainte
 imposée à votre contenu** : rien n'est jamais refusé ni tronqué à l'exécution. Un volet de

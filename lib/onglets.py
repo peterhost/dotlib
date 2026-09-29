@@ -928,24 +928,35 @@ class Interface:
         Rend le haut et la hauteur de ce qui reste pour le contenu qui défile."""
         if not bloc:
             return haut, hauteur
-        demo = list(bloc["lignes"])
         if hauteur < 6:                        # trop court pour couper le volet en deux : pas d'aperçu
             return haut, hauteur
-        demo = demo[: max(1, (hauteur - 2) // 2)]
         largeur_utile = max(1, largeur - colonne - 3)
+        maxi = max(1, (hauteur - 2) // 2)
+        # Les lignes d'aperçu se REPLIENT comme le reste, au lieu d'être coupées au bord : une
+        # démonstration tronquée montre une couleur sans montrer ce qu'elle qualifie, et le texte
+        # disparaissait en silence. C'est donc le nombre de lignes d'ÉCRAN qui borne le bloc.
         self.apercu = jeu
         try:
-            for i, l in enumerate(demo):
+            ecran = []
+            for l in bloc["lignes"]:
                 if self.filet(l):
-                    self.ecrire(haut + i, colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))
-                    continue
-                for x, texte, attr in self.peindre(colonne + 2, plier(l, largeur_utile)[0],
-                                                   self.style_ligne(l), o.vocabulaire, True):
+                    ecran.append([(colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))])
+                else:
+                    style = self.style_ligne(l)
+                    morceaux = plier(l, largeur_utile)
+                    ecran.append(self.peindre(colonne + 2, morceaux[0], style, o.vocabulaire, True))
+                    for suite in morceaux[1:]:
+                        ecran.append(self.peindre(colonne + 5, suite, style, o.vocabulaire))
+                if len(ecran) >= maxi:
+                    break
+            ecran = ecran[:maxi]
+            for i, segments in enumerate(ecran):
+                for x, texte, attr in segments:
                     self.ecrire(haut + i, x, texte, attr)
         finally:
             self.apercu = None                 # le reste de l'interface garde la palette EN SERVICE
-        self.ecrire(haut + len(demo), colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))
-        return haut + len(demo) + 1, hauteur - len(demo) - 1
+        self.ecrire(haut + len(ecran), colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))
+        return haut + len(ecran) + 1, hauteur - len(ecran) - 1
 
     @staticmethod
     def filet(l):
