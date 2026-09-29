@@ -106,6 +106,7 @@ construisez sans elle.
 
     1 : API 1 d'origine
     2 : genre « groupes » et `action` au contrat, paramètre `comptes=`
+    3 : coloration du volet de contenu — `decouper()`, `Onglet(vocabulaire=)`
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
@@ -119,7 +120,11 @@ testent — l'un d'eux n'a aucune copie de repli.
   ou si curses ne démarre pas, avec une ligne « `nom` : … » sur la sortie d'erreur (l'appelant
   affiche alors son contenu à la suite). Jamais d'exception de terminal ; le terminal est toujours
   rendu, y compris si un onglet lève.
-- `onglets.Onglet(titre, produire, genre="texte", comptes=True)` — `comptes=False` retire le nombre
+- `onglets.Onglet(titre, produire, genre="texte", comptes=True, vocabulaire=None)` —
+  `vocabulaire` : les noms que CET onglet sait être des commandes (`("brc", "doctor")`), pour qu'ils
+  prennent la couleur des commandes quand une description les cite. Le module ne les devine pas : lui
+  seul ignore ce qui est une commande dans votre monde. Facultatif, et sans lui le reste de la
+  coloration fonctionne. — `comptes=False` retire le nombre
   affiché à côté de chaque nom dans la colonne de gauche : un décompte de lignes ne veut rien dire
   pour un groupe qui est un RÉGLAGE (« catppuccin 6 » n'informe de rien). — `produire` est un appelable sans argument, appelé à la
   PREMIÈRE ouverture de l'onglet et gardé (`r` recharge). Une exception d'un producteur n'emporte
@@ -145,6 +150,13 @@ testent — l'un d'eux n'a aucune copie de repli.
   Ne jamais utiliser `locale.getpreferredencoding()` : depuis Python 3.7 il rend `utf-8` même sous
   `LC_ALL=C` (PEP 538/540), donc tout repli ASCII fondé sur lui est du code mort.
 - `onglets.ordonner(presents, reference)` → les présents dans l'ordre de référence, les autres à la suite.
+- `onglets.decouper(texte, vocabulaire=(), terme=False)` → `[(fragment, genre), …]`, genre parmi
+  `touche`, `commande`, `chemin`, `option`, `variable`, `terme`, ou `""` pour la prose.
+  `terme=True` n'est à passer que sur la PREMIÈRE ligne d'écran d'une entrée (le module le fait pour
+  vous) : ailleurs, la règle des deux colonnes repeindrait une phrase entière. Sans curses, sans terminal :
+  c'est une fonction de texte, donc testable seule. **Le recollement des fragments rend exactement le
+  texte d'entrée** — c'est l'invariant qui compte, puisque les fragments sont posés à l'écran chacun à
+  son abscisse. Voir « Coloration du volet de contenu » plus bas.
 
 ### Mise en forme des lignes (genre « texte »)
 
@@ -156,6 +168,39 @@ Quatre repères, en tête de ligne, et pas un de plus :
 | `✓` | bon | `+` |
 | `✗` | mauvais | `x` |
 | `!` | avertissement | `!` |
+
+### Coloration du volet de contenu
+
+Le volet de droite (ou le volet unique) n'est plus d'une seule couleur. Dans chaque ligne, ce qui
+n'est pas de la prose est reconnu et coloré selon un rôle de la palette du shell :
+
+| ce qui est reconnu | exemples | rôle de palette |
+|---|---|---|
+| le sujet d'une ligne alignée en deux colonnes (séparateur : deux espaces ou plus) | `dépôt`, `mise à jour`, `LargeFile`, `:Theme` | `num` |
+| séquence de touches entre parenthèses, ou touche « leader » | `(,h)`, `(Ctrl-x)`, `(Dp)`, `(Entrée)`, `,ev` | `key` — la même que la colonne des touches |
+| commande Ex, ou code entre accents graves, ou mot du `vocabulaire` | `:Keys`, `` `git status` ``, `brc` | `num` |
+| chemin | `~/.bashrc`, `/etc/profile` | `path` |
+| option | `--json`, `-v` | `date` |
+| variable du shell | `$EDITOR`, `${HOME}` | `note` |
+| tout le reste | la prose | couleur par défaut du terminal |
+
+Le principe est de **peindre peu** : la couleur ne vaut que par contraste avec de la prose qui n'en a
+pas. Un volet entièrement coloré est aussi illisible qu'un volet entièrement blanc, et c'est pourquoi
+les nombres nus ne sont pas colorés (« Marked 2 », « 3 fichiers » n'apprennent rien) et qu'une
+parenthèse qui contient un NOM (`(tabular)`, `(MacVim)`, `(jq)`) ou un numéro (`bash 5.3.15(1)`)
+reste de la prose. Chaque cas de ce tableau a été **mesuré sur les vrais volets** des deux outils,
+et les erreurs relevées là sont devenues des cas de test : `/57` de « 57/57 », `/sombre` de
+« clair/sombre », `/..` de « cd ../.. », `-release` d'un numéro de version, `(ms)` d'une unité. Un test mesure cette
+sobriété sur un échantillon réel de 112 descriptions et **échoue au-delà d'un quart des caractères
+colorés** : sans ce plafond, rien n'empêcherait la grammaire de redevenir gourmande.
+
+**Une ligne qui porte déjà un repère (`==`, `✓`, `✗`, `!`) n'est pas recolorée** : son sens est dans
+sa couleur d'ensemble, et repeindre ses mots la lui ferait perdre.
+
+Pour que le sujet d'une ligne soit reconnu, **séparez les deux colonnes par au moins deux espaces**
+(`"  %-16s  %s"`, et non `"  %-16s %s"` : un seul espace, sur un nom qui remplit la colonne, ne
+laisse aucun séparateur). C'est la seule chose à faire côté appelant, et elle vaut pour les deux
+outils — c'est là que se joue la cohérence entre eux.
 
 ### Dégradation — garantie et testée
 

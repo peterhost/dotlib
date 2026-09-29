@@ -39,7 +39,8 @@ API_COMPATIBLES = (1,)
 # Un appelant qui emploie une nouveauté teste « onglets.REVISION >= n » ; sans cela il tombe sur une
 # TypeError, c'est-à-dire un défaut chez lui pour une insuffisance chez nous.
 #   1 : API 1 d'origine · 2 : genre « groupes » et `action` au contrat, et `comptes=`
-REVISION = 2
+#   3 : coloration du volet de contenu — decouper(), Onglet(vocabulaire=)
+REVISION = 3
 
 SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 AIDE = "←→ onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
@@ -113,6 +114,126 @@ def palette_dotlib():
     except (OSError, ValueError):
         return {}
     return roles
+
+
+# --- lisibilité du volet de droite : reconnaître, dans une phrase, ce qui n'est pas de la prose ---
+# Écrit d'après de VRAIES descriptions, pas d'après une idée de ce qu'elles pourraient contenir :
+#   « aide sur le mot sous le curseur (,h), recherche dans toute l'aide (,H) »
+#   « liste des buffers : ici (,be), bascule (,bt), partage horizontal (,bs) ou vertical (,bv) »
+#   « l'aide des raccourcis (,? puis un thème avec :Keys) »   « éditer ~/.bashrc »
+# La convention observée est la parenthèse : c'est là que vivent les séquences de touches, et c'est
+# ce qu'on cherche des yeux. Le reste — chemins, options, variables du shell — se reconnaît seul.
+# Principe directeur : PEINDRE PEU. Un texte entièrement coloré est aussi illisible qu'un texte
+# entièrement blanc ; la couleur ne vaut que par contraste avec de la prose qui n'en a pas. C'est
+# pourquoi les nombres nus ne sont pas colorés (« Marked 2 », « 3 fichiers » n'apprennent rien).
+
+# Noms de touches écrits en mots : sans cette petite liste, « (Entrée) » passerait pour de la prose.
+TOUCHES_MOTS = ("Entrée", "Entree", "Espace", "Tab", "Échap", "Echap", "Retour", "Suppr",
+                "haut", "bas", "gauche", "droite")
+
+MOTIFS = (
+    ("commande", re.compile(r"`[^`]+`")),                          # `du code entre accents graves`
+    ("commande", re.compile(r"(?<![\w:])::?[A-Za-z][\w!]*")),        # :Keys, :Tabularize — commandes Ex
+    # La touche « leader » hors parenthèses : « ,? », « ,ev ». Exigences volontairement étroites
+    # (précédée d'un blanc ou d'une parenthèse, trois caractères au plus, aucun espace) pour qu'une
+    # virgule de phrase française — toujours suivie d'un espace — n'entre jamais là-dedans.
+    ("touche",   re.compile(r"(?<=[\s(])[,;][^\s,;)]{1,3}(?=[\s,;)]|$)")),
+    # Un chemin, et non n'importe quoi qui porte une barre oblique. Mesuré sur de vraies lignes :
+    # « 57/57 installés » et « le clair/sombre » donnaient « /57 » et « /sombre » pour des chemins.
+    # Donc : « ~/… » toujours ; sinon il faut deux segments (/usr/bin/vim) ou un point (/.profile),
+    # et jamais un chiffre juste après la barre.
+    ("chemin",   re.compile(r"~/[\w.\-/]*\w"
+                           r"|/[A-Za-z_][\w.\-]*(?:/[\w.\-]+)+"
+                           r"|/\.[A-Za-z][\w.\-]*"      # /.profile — mais pas « /.. » de « cd ../.. »
+                           r"|/[A-Za-z_][\w.\-]*\.[A-Za-z][\w.\-]*"
+                           # relatif, mais seulement s'il porte une extension : « rc.d/00-platform.sh »,
+                           # « lots/10-navigation.sh ». Sans cette exigence, « clair/sombre » et
+                           # « et/ou » deviendraient des chemins.
+                           r"|(?<![\w/])[\w.\-]+/[\w.\-/]*\.[A-Za-z]\w*")),
+    # Une option commence un mot : elle est précédée d'un blanc, d'une parenthèse, d'un « = » ou
+    # d'une virgule, sinon de rien du tout. Mesuré : « bash 5.3.15(1)-release » donnait « -release ».
+    ("option",   re.compile(r"(?<![^\s(=,])--?[A-Za-z][\w-]*")),      # --json, -v
+    ("variable", re.compile(r"\$\{?\w+\}?")),                        # $EDITOR, ${HOME}
+)
+_PAREN = re.compile(r"\(([^()\s]{1,14})\)")
+# Le TERME défini, dans un volet aligné en deux colonnes — la forme dominante des onglets « texte » :
+#   « dépôt        ~/.vim   branche master »   « LargeFile              installé »
+#   « :Keys        l'aide des raccourcis »     « mise à jour  aucune trace »
+# C'est ce que le propriétaire appelle « la commande » : le mot qu'on cherche des yeux à gauche. Le
+# séparateur est l'alignement lui-même (deux espaces au moins), ce qui distingue un terme d'une
+# phrase, où les mots sont séparés par un seul espace. Le terme peut en contenir (« mise à jour »),
+# d'où la limite de longueur : au-delà, c'est de la prose et non une étiquette.
+_TERME = re.compile(r"[ \t]*(\S[^\t]{0,31}?)[ \t]{2,}\S")
+
+
+def _touche(contenu):
+    """Le contenu d'une parenthèse est-il une séquence de touches ? Vrai s'il porte un caractère de
+    ponctuation qu'on tape (« ,h », « Ctrl-x », « 'b »), s'il nomme une touche en mots, ou s'il est
+    d'un seul caractère (« o », « # », « * »). Faux pour « (tabular) » et « (MacVim) », qui sont des
+    noms — et faux, mesuré sur de vraies lignes, pour « (1) » d'un numéro de version et « (ms) »
+    d'une unité : un nombre nu n'est pas une touche, et deux minuscules sont un mot."""
+    if contenu in TOUCHES_MOTS:
+        return True
+    if contenu.isdigit():
+        return False
+    if len(contenu) == 1:
+        return True
+    if len(contenu) == 2:
+        return not contenu.isalpha() or contenu != contenu.lower()
+    return bool(re.search(r"[,;:'\"@<>/\-]", contenu))
+
+
+def decouper(texte, vocabulaire=(), terme=False):
+    """Découpe un texte en [(fragment, genre)] — genre : commande, touche, chemin, option, variable,
+    ou terme, ou "" pour la prose, qui garde la couleur par défaut du terminal.
+
+    `terme=True` : cette ligne commence une entrée, donc sa première colonne — si la ligne est alignée
+    en deux colonnes — est le sujet défini. À ne pas passer sur une ligne de repli.
+
+    `vocabulaire` : les noms que l'appelant sait être des commandes chez lui. Le socle ne peut pas
+    les deviner : il ne sait pas ce qui est une commande dans SON monde. Sans terminal, sans couleurs
+    et sans curses : c'est une fonction de texte, donc testable seule."""
+    trouves = []
+
+    def libre(d, f):
+        return not any(a < f and d < b for a, b, _ in trouves)
+
+    # En PREMIER, parce qu'il prime : dans « ~/.bashrc   le fichier principal », ce qui est à gauche
+    # est le sujet de la ligne avant d'être un chemin. Réservé à la PREMIÈRE ligne d'écran d'une
+    # entrée (« terme=True ») : sur une ligne de repli, ou dans la description d'un raccourci — où
+    # deux espaces séparent le texte de sa portée —, la règle repeindrait une phrase entière.
+    if terme:
+        m = _TERME.match(texte)
+        # Un nombre nu n'est pas un sujet : « 3  lots/10-navigation.sh » énonce une durée, et c'est le
+        # module qui est le sujet. Peindre le nombre inverserait l'information.
+        if m and not m.group(1).strip("0123456789.,:").strip() == "":
+            trouves.append((m.start(1), m.end(1), "terme"))
+
+    for m in _PAREN.finditer(texte):
+        contenu = m.group(1)
+        if contenu.startswith(":"):
+            continue                                   # (:Keys) → laissé au motif des commandes
+        if _touche(contenu) and libre(m.start(1), m.end(1)):
+            trouves.append((m.start(1), m.end(1), "touche"))
+    for genre, motif in MOTIFS:
+        for m in motif.finditer(texte):
+            if libre(m.start(), m.end()):
+                trouves.append((m.start(), m.end(), genre))
+    mots = set(v for v in vocabulaire if v and len(v) > 1)
+    if mots:
+        for m in re.finditer(r"[\w.\-]+", texte):
+            if m.group() in mots and libre(m.start(), m.end()):
+                trouves.append((m.start(), m.end(), "commande"))
+    trouves.sort()
+    out, curseur = [], 0
+    for debut, fin, genre in trouves:
+        if debut > curseur:
+            out.append((texte[curseur:debut], ""))
+        out.append((texte[debut:fin], genre))
+        curseur = fin
+    if curseur < len(texte):
+        out.append((texte[curseur:], ""))
+    return out or [(texte, "")]
 
 
 def plier(texte, largeur):
@@ -196,8 +317,12 @@ def ordonner(presents, reference):
 class Onglet:
     """Un onglet : un titre, de quoi produire son contenu (chargé à la première ouverture et gardé)."""
 
-    def __init__(self, titre, produire, genre="texte", action=None, comptes=True):
+    def __init__(self, titre, produire, genre="texte", action=None, comptes=True, vocabulaire=None):
         self.titre = titre
+        # Les noms que CET onglet sait être des commandes, pour qu'ils prennent leur couleur quand une
+        # description les cite. Le socle ne les devine pas : lui seul ignore ce qui est une commande
+        # dans le monde de l'appelant. Facultatif — sans lui, le reste de la coloration marche.
+        self.vocabulaire = tuple(vocabulaire or ())
         self.produire = produire
         self.genre = genre
         self.comptes = comptes      # False : pas de nombre à côté des noms (groupe de réglage)
@@ -246,7 +371,8 @@ class Interface:
         use_default_colors() comme init_pair() y lèvent — sans try, l'interface ne s'ouvrirait pas
         là où elle marcherait très bien en monochrome."""
         noms = (("titre", curses.COLOR_YELLOW), ("touche", curses.COLOR_CYAN), ("portee", curses.COLOR_BLUE),
-                ("mauvais", curses.COLOR_RED), ("onglet", curses.COLOR_GREEN))
+                ("mauvais", curses.COLOR_RED), ("onglet", curses.COLOR_GREEN),
+                ("commande", curses.COLOR_MAGENTA))
         self.paires = dict((n, 0) for n, _ in noms)
         self.paires["choix"] = 0        # surbrillance de la sélection (la paire des correspondances)
         try:
@@ -265,7 +391,7 @@ class Interface:
         # rôles de dotlib ↔ rôles d'ici : les touches sont des « clés », les titres des « notes »,
         # la portée un chemin grisé, le mauvais un « bad », l'onglet une date
         corresp = (("titre", "note"), ("touche", "key"), ("portee", "path"),
-                   ("mauvais", "bad"), ("onglet", "date"))
+                   ("mauvais", "bad"), ("onglet", "date"), ("commande", "num"))
         palette = palette_dotlib()
         if palette and getattr(curses, "COLORS", 8) >= 256 and all(r in palette for _, r in corresp):
             for i, (nom, role) in enumerate(corresp, start=1):
@@ -276,8 +402,8 @@ class Interface:
                     pass
             if "match_fg" in palette and "match_bg" in palette:
                 try:
-                    curses.init_pair(6, palette["match_fg"], palette["match_bg"])
-                    self.paires["choix"] = curses.color_pair(6)
+                    curses.init_pair(len(corresp) + 1, palette["match_fg"], palette["match_bg"])
+                    self.paires["choix"] = curses.color_pair(len(corresp) + 1)
                 except curses.error:
                     pass
             return
@@ -293,6 +419,43 @@ class Interface:
         if not a and nom in ("titre", "onglet"):      # monochrome : garder les repères lisibles
             a = curses.A_BOLD
         return a | curses.A_BOLD if gras else a
+
+    # Genre reconnu par decouper() ↔ paire de couleurs. Une touche garde EXACTEMENT la couleur de
+    # la colonne des touches : « (,h) » dans une phrase et « ,h » dans la colonne sont la même chose,
+    # et rien ne serait plus troublant que deux couleurs pour cela. Un chemin prend le rôle « path »
+    # de la palette, une commande le rôle « num », une variable la couleur des titres.
+    GENRES = {"touche": "touche", "chemin": "portee", "option": "onglet",
+              "commande": "commande", "variable": "titre", "terme": "commande"}
+
+    def peindre(self, x, texte, fond=0, vocabulaire=(), terme=False):
+        """Rend une ligne déjà pliée sous forme de segments [(x, fragment, attr)].
+
+        `fond` non nul = la ligne entière a déjà un sens (titre, verdict bon ou mauvais) : on n'y
+        touche pas. Repeindre les mots d'une ligne rouge ferait perdre le rouge, qui est l'information.
+        Sans couleurs, tous les attributs valent 0 et l'affichage est identique au caractère près."""
+        if fond:
+            return [(x, texte, fond)]
+        segments, position = [], x
+        for fragment, genre in decouper(texte, vocabulaire, terme):
+            if not self.utf8:
+                fragment = ascii_lisible(fragment)      # avant de compter : « … » vaut trois colonnes
+            attr = self.attr(self.GENRES[genre]) if genre else 0
+            if segments and segments[-1][2] == attr:    # recoller ce qui a la même couleur
+                x0, avant, _ = segments[-1]
+                segments[-1] = (x0, avant + fragment, attr)
+            else:
+                segments.append((position, fragment, attr))
+            position += len(fragment)
+        return segments
+
+    def rendre(self, o, ecran, haut, hauteur, largeur):
+        """Le défilement, le compteur et le tracé, une seule fois pour les trois genres."""
+        o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
+        o.total_ecran = len(ecran)
+        for i, segments in enumerate(ecran[o.haut:o.haut + hauteur]):
+            for x, texte, attr in segments:
+                self.ecrire(haut + i, x, texte, attr)
+        self.compteur(haut, hauteur, largeur, o.haut, len(ecran))
 
     # --- dessin -----------------------------------------------------------------------------------------
     def ecrire(self, y, x, texte, attr=0):
@@ -432,14 +595,9 @@ class Interface:
                 if j < len(tw):
                     segments.append((x_touches, tw[j], self.attr("touche", True)))
                 if j < len(dw):
-                    segments.append((x_desc, dw[j], 0))
+                    segments.extend(self.peindre(x_desc, dw[j], 0, o.vocabulaire))
                 ecran.append(segments)
-        o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
-        o.total_ecran = len(ecran)
-        for i, segments in enumerate(ecran[o.haut:o.haut + hauteur]):
-            for x, texte, attr in segments:
-                self.ecrire(haut + i, x, texte, attr)
-        self.compteur(haut, hauteur, largeur, o.haut, len(ecran))
+        self.rendre(o, ecran, haut, hauteur, largeur)
 
     def dessiner_groupes(self, o, haut, hauteur, largeur):
         groupes = o.charger()
@@ -461,14 +619,10 @@ class Interface:
         for l in lignes:
             style = self.style_ligne(l)
             morceaux = plier(l, max(1, largeur - colonne - 3))
-            ecran.append((colonne + 2, morceaux[0], style))
+            ecran.append(self.peindre(colonne + 2, morceaux[0], style, o.vocabulaire, True))
             for suite in morceaux[1:]:
-                ecran.append((colonne + 5, suite, style))
-        o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
-        o.total_ecran = len(ecran)
-        for i, (x, texte, style) in enumerate(ecran[o.haut:o.haut + hauteur]):
-            self.ecrire(haut + i, x, texte, style)
-        self.compteur(haut, hauteur, largeur, o.haut, len(ecran))
+                ecran.append(self.peindre(colonne + 5, suite, style, o.vocabulaire))
+        self.rendre(o, ecran, haut, hauteur, largeur)
 
     def style_ligne(self, l):
         nu = l.strip()
@@ -492,14 +646,10 @@ class Interface:
         for l in lignes:
             style = self.style_ligne(l)
             morceaux = plier(l, max(1, largeur - 2))
-            ecran.append((1, morceaux[0], style))
+            ecran.append(self.peindre(1, morceaux[0], style, o.vocabulaire, True))
             for suite in morceaux[1:]:
-                ecran.append((4, suite, style))
-        o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
-        o.total_ecran = len(ecran)
-        for i, (x, texte, style) in enumerate(ecran[o.haut:o.haut + hauteur]):
-            self.ecrire(haut + i, x, texte, style)
-        self.compteur(haut, hauteur, largeur, o.haut, len(ecran))
+                ecran.append(self.peindre(4, suite, style, o.vocabulaire))
+        self.rendre(o, ecran, haut, hauteur, largeur)
 
     def dessiner(self):
         self.ecran.erase()

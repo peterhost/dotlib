@@ -21,9 +21,10 @@ sys.path.insert(0, os.environ["ONGLETS_DIR"])
 import onglets
 def groupes():
     return [("alpha", ["== titre alpha", "ligne a1", "✓ bon"]), ("beta", ["ligne b1"])]
-o = [onglets.Onglet("Texte", lambda: ["premiere ligne", "MOT-CHERCHE ici", "derniere ligne"]),
+o = [onglets.Onglet("Texte", lambda: ["premiere ligne", "MOT-CHERCHE ici",
+                                      "pose dans ~/.dotlib, voir $DOTLIB_THEME", "derniere ligne"]),
      onglets.Onglet("Groupes", groupes, genre="groupes", action=lambda n: "applique %s" % n),
-     onglets.Onglet("Raccourcis", lambda: {"entrees": [["vim", "edition", "x", "effacer", "global"],
+     onglets.Onglet("Raccourcis", lambda: {"entrees": [["vim", "edition", "x", "effacer le mot (,h) puis :Keys", "global"],
                                                         ["bash", "edition", " ", "espace", "mode insertion"]],
                                             "themes": ["edition"]}, genre="raccourcis")]
 sys.exit(onglets.lancer(o, "essai"))
@@ -60,6 +61,22 @@ case $out in *bash*Espace*|*Espace*bash*) ok "raccourcis : colonne source affich
 out=$(lance '2q' TERM=vt100 LANG=en_US.UTF-8)
 case $out in *"2 Groupes"*alpha*CODE=0*) ok "sans couleurs (vt100) : rendu lisible, sortie propre" ;; *) ko "vt100" "$(printf '%s' "$out" | tail -4)" ;; esac
 printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "vt100 : des couleurs ont été émises" || ok "sans couleurs : aucune séquence de couleur émise"
+
+# 5 bis. La coloration du volet de contenu : des couleurs ENTRENT dans la ligne, et la ligne reste
+# intacte une fois les couleurs retirées. Le second point est le vrai : placer des fragments l'un
+# après l'autre à leur abscisse est une occasion de perdre un caractère, et c'est un défaut
+# d'affichage, pas de décoration. (Le test 5 ci-dessus garantit l'autre côté : sans couleurs, rien.)
+out=$(lance '1q' TERM=xterm-256color LANG=en_US.UTF-8)
+nu=$(printf '%s' "$out" | sed "s/$E\[[0-9;]*m//g; s/$E[()][B0]//g")
+case $nu in *'pose dans ~/.dotlib, voir $DOTLIB_THEME'*) ok "coloration : la ligne reste intacte une fois les couleurs retirées" ;;
+            *) ko "coloration : ligne altérée" "$(printf '%s' "$nu" | grep -n 'pose dans')" ;; esac
+printf '%s' "$out" | LC_ALL=C grep -q "$E\[[0-9;]*m~/\.dotlib" \
+  && ok "coloration : le chemin cité dans une phrase reçoit sa couleur" \
+  || ko "coloration : aucune couleur devant le chemin" "$(printf '%s' "$out" | LC_ALL=C grep -a 'dotlib,' | cat -v | head -2)"
+out=$(lance '3q' TERM=xterm-256color LANG=en_US.UTF-8)
+printf '%s' "$out" | LC_ALL=C grep -q "$E\[[0-9;]*m,h" \
+  && ok "coloration : une séquence de touches entre parenthèses reçoit la couleur des touches" \
+  || ko "coloration : touche non colorée" "$(printf '%s' "$out" | LC_ALL=C grep -a 'effacer' | cat -v | head -2)"
 
 # 6. Locale non UTF-8 : cadres en ASCII, pas de caractères semi-graphiques
 out=$( ( sleep 1.2; printf q; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=C LC_ALL=C \
@@ -213,7 +230,7 @@ case $out in *Traceback*) ko "lancer() laisse échapper une exception" "$out" ;;
 # 14 et 15. Le pliage et la palette, éprouvés par les tests de la session vim (repris tels quels :
 # ils sont mesurés sur ses vraies données, et ils refusent de conclure si le module n'expose pas la
 # fonction attendue — plutôt que de passer à vide).
-for t in pliage palette; do
+for t in pliage palette coloration; do
   out=$($PY "$ROOT/test/$t.py" "$ROOT/lib/onglets.py" 2>&1)
   case $out in
     *ÉCHEC*|*Traceback*) ko "$t" "$out" ;;
