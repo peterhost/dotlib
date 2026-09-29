@@ -10,6 +10,12 @@ ko() { FAIL=$((FAIL + 1)); printf '  %s✗%s %s\n' "$R" "$N" "$1"; [ -n "${2:-}"
 command -v python3 >/dev/null 2>&1 || { echo "python3 absent : test sauté"; exit 0; }
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/dotlib-onglets.XXXXXX"); trap 'rm -rf "$TMP"' EXIT INT TERM
 cp "$ROOT/lib/onglets.py" "$TMP/"
+# dotlib FACTICE : le banc ne doit rien lire de la vraie installation, ni rien pouvoir y écrire.
+mkdir -p "$TMP/share" "$TMP/local"
+cp "$ROOT/share/palettes.tsv" "$TMP/share/"
+cp "$ROOT/share/palettes-sources.tsv" "$TMP/share/" 2>/dev/null || :
+printf 'DOTLIB_THEME=dark\nDOTLIB_PALETTE=catppuccin\n' > "$TMP/local/theme.conf"
+cp "$TMP/local/theme.conf" "$TMP/theme.temoin"
 PY=python3
 E=$(printf '\033')
 
@@ -84,6 +90,60 @@ out=$(lance '3q' TERM=xterm-256color LANG=en_US.UTF-8)
 printf '%s' "$out" | LC_ALL=C grep -q "$E\[[0-9;]*m,h" \
   && ok "coloration : une séquence de touches entre parenthèses reçoit la couleur des touches" \
   || ko "coloration : touche non colorée" "$(printf '%s' "$out" | LC_ALL=C grep -a 'effacer' | cat -v | head -2)"
+
+# 5 ter. L'APERÇU : un groupe peint ses lignes de tête avec une AUTRE palette que celle en service,
+# sans toucher au réglage. C'est ce qui permet de comparer deux thèmes avant d'en choisir un ; peindre
+# l'aperçu avec la palette ACTIVE serait un mensonge, et un mensonge est pire que pas de couleur.
+cat > "$TMP/apercu.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+def groupes():
+    return [("nord", ["detail ~/.chemin-du-detail"]), ("gruvbox", ["autre"])]
+def apercu(nom):
+    return {"lignes": ["== demonstration", "chemin ~/.chemin-de-demo", "---", "prose ordinaire"],
+            "palette": nom, "theme": "dark", "match": os.environ.get("ESSAI_MATCH") or None}
+o = [onglets.Onglet("T", groupes, genre="groupes", apercu=apercu,
+                    action=lambda n: "pose %s" % n)]
+sys.exit(onglets.lancer(o, "apercu"))
+P
+lance_a() { keys=$1; shift
+  ( sleep 1.2; printf '%b' "$keys"; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin \
+    ONGLETS_DIR="$TMP" DOTLIB_DIR="$TMP" "$@" \
+    script -q /dev/null sh -c "$PY \"$TMP/apercu.py\"; echo CODE=\$?" 2>&1 | tr -d '\r'; }
+
+out=$(lance_a 'q' TERM=xterm-256color LANG=en_US.UTF-8)
+case $out in *"demonstration"*"prose ordinaire"*) ok "aperçu : les lignes de tête sont affichées" ;;
+             *) ko "aperçu absent" "$(printf '%s' "$out" | tail -5)" ;; esac
+# le filet : au moins quatre traits d'affilée, donc une ligne entière et non les trois tirets écrits
+printf '%s' "$out" | grep -q '────' && ok "aperçu : « --- » devient un filet sur toute la largeur" \
+  || ko "filet non tracé" "$(printf '%s' "$out" | tail -5)"
+# LE point : le chemin de l'aperçu est peint en nord (60), celui du contenu en catppuccin (103)
+printf '%s' "$out" | LC_ALL=C grep -q "38;5;60m~/\.chemin-de-demo" \
+  && ok "aperçu : peint avec la palette DEMANDÉE (nord), pas celle en service" \
+  || ko "aperçu : mauvaise palette" "$(printf '%s' "$out" | LC_ALL=C grep -ao '38;5;[0-9]*m~/[a-z.-]*' | sort -u)"
+printf '%s' "$out" | LC_ALL=C grep -q "38;5;103m~/\.chemin-du-detail" \
+  && ok "aperçu : le reste du volet garde la palette en service (catppuccin)" \
+  || ko "le contenu a changé de palette" "$(printf '%s' "$out" | LC_ALL=C grep -ao '38;5;[0-9]*m~/[a-z.-]*' | sort -u)"
+cmp -s "$TMP/local/theme.conf" "$TMP/theme.temoin" && ok "aperçu : le réglage n'a pas été touché" \
+  || ko "l'aperçu a modifié theme.conf"
+# Les CORRESPONDANCES (« fond coloré » / « texte gras ») : un réglage qui ne se voit que sur une
+# surbrillance. Le montrer sur la ligne sélectionnée est le seul endroit où ces couleurs servent
+# vraiment ; ailleurs, on inventerait une surbrillance pour l'occasion.
+out=$(lance_a 'q' TERM=xterm-256color LANG=en_US.UTF-8 ESSAI_MATCH=fond)
+printf '%s' "$out" | LC_ALL=C grep -q "48;5;110" \
+  && ok "aperçu : « fond coloré » se montre sur la sélection, dans la palette de l'aperçu" \
+  || ko "correspondance en fond non montrée" "$(printf '%s' "$out" | LC_ALL=C grep -ao '48;5;[0-9]*' | sort -u)"
+out=$(lance_a 'q' TERM=xterm-256color LANG=en_US.UTF-8 ESSAI_MATCH=texte)
+printf '%s' "$out" | LC_ALL=C grep -q "48;5;110" \
+  && ko "« texte gras » ne doit pas colorer le fond" \
+  || ok "aperçu : « texte gras » ne colore pas le fond, à la différence de « fond coloré »"
+
+# sans couleurs : un aperçu ne peut pas être honoré, et il ne ment pas — aucune couleur émise
+out=$(lance_a 'q' TERM=vt100 LANG=en_US.UTF-8)
+printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "aperçu vt100 : des couleurs émises" \
+  || ok "aperçu : sans couleurs, rien n'est peint plutôt qu'une palette fausse"
 
 # 6. Locale non UTF-8 : cadres en ASCII, pas de caractères semi-graphiques
 out=$( ( sleep 1.2; printf q; sleep 1 ) | env -i HOME="$TMP" PATH=/usr/bin:/bin:/opt/homebrew/bin ONGLETS_DIR="$TMP" TERM=xterm-256color LANG=C LC_ALL=C \

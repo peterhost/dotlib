@@ -108,6 +108,7 @@ construisez sans elle.
     2 : genre « groupes » et `action` au contrat, paramètre `comptes=`
     3 : coloration du volet de contenu — `decouper()`, `Onglet(vocabulaire=)`
     4 : les lignes de commande se peignent entières ; affectations et noms de fichiers reconnus
+    5 : `Onglet(apercu=)`, repère `---`, `sources_palette()`
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
@@ -155,6 +156,9 @@ testent — l'un d'eux n'a aucune copie de repli.
   Ne jamais utiliser `locale.getpreferredencoding()` : depuis Python 3.7 il rend `utf-8` même sous
   `LC_ALL=C` (PEP 538/540), donc tout repli ASCII fondé sur lui est du code mort.
 - `onglets.ordonner(presents, reference)` → les présents dans l'ordre de référence, les autres à la suite.
+- `onglets.sources_palette(nom)` → `{"git": …, "site": …}`, clés absentes s'il n'y a rien, `{}` si la
+  palette est inconnue ou le fichier illisible. Lit `share/palettes-sources.tsv`, une DONNÉE : une
+  palette ajoutée là n'oblige à toucher aucun programme.
 - `onglets.decouper(texte, vocabulaire=(), terme=False)` → `[(fragment, genre), …]`, genre parmi
   `touche`, `commande`, `chemin`, `option`, `variable`, `terme`, ou `""` pour la prose.
   `terme=True` n'est à passer que sur la PREMIÈRE ligne d'écran d'une entrée (le module le fait pour
@@ -173,6 +177,39 @@ Quatre repères, en tête de ligne, et pas un de plus :
 | `✓` | bon | `+` |
 | `✗` | mauvais | `x` |
 | `!` | avertissement | `!` |
+| `---` | filet sur toute la largeur | `---` |
+
+Le filet est un repère et non un dessin à faire soi-même : écrire « ──── » à la main donne des
+« [?] » sous une locale non UTF-8, et c'est au socle de choisir le caractère selon le terminal.
+
+### Aperçu d'un groupe dans une autre palette
+
+`Onglet(..., apercu=fonction)` — `fonction(nom_du_groupe)` rend `None`, ou :
+
+    {"lignes": [...], "palette": "nord", "theme": "dark"|"light"|None, "match": "fond"|"texte"|None}
+
+Ces lignes sont peintes **avec la palette demandée**, en tête du volet de droite et **hors
+défilement** : c'est une zone de comparaison, et passer d'un thème au suivant ne doit pas la faire
+bouger sous les yeux. Un filet la sépare du contenu ordinaire, qui défile en dessous et garde la
+palette **en service**, comme tout le reste de l'interface.
+
+Garanties, dans l'ordre où elles comptent :
+
+- **le réglage n'est JAMAIS touché.** On lit une palette, on l'applique à un bloc de paires à part,
+  et le fichier de thème reste ce qu'il est tant que l'utilisateur n'a pas validé par Entrée ;
+- **quand l'aperçu ne peut pas être honoré** — moins de 256 couleurs, pas assez de paires, palette
+  inconnue —, le bloc s'affiche **sans couleur**, et non avec celles en service : montrer la palette
+  ACTIVE en prétendant montrer une autre serait un mensonge, et un mensonge est pire que l'absence
+  de couleur ;
+- `"match"` se montre sur **la ligne sélectionnée** de la colonne de gauche. C'est le seul endroit
+  où les couleurs de correspondance servent pour de vrai ; les montrer ailleurs obligerait à
+  inventer une surbrillance pour l'occasion ;
+- une fenêtre trop courte (moins de six lignes de contenu) n'affiche pas d'aperçu plutôt que de
+  couper le volet en deux ; un producteur d'aperçu qui lève ne fait pas tomber l'onglet.
+
+**Les plafonds de sobriété mesurés plus bas sont ceux du banc d'essai de ce dépôt, pas une contrainte
+imposée à votre contenu** : rien n'est jamais refusé ni tronqué à l'exécution. Un volet de
+démonstration qui dépasserait 30 % de caractères peints ne pose donc aucun problème.
 
 ### Coloration du volet de contenu
 

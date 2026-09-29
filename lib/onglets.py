@@ -41,7 +41,8 @@ API_COMPATIBLES = (1,)
 #   1 : API 1 d'origine · 2 : genre « groupes » et `action` au contrat, et `comptes=`
 #   3 : coloration du volet de contenu — decouper(), Onglet(vocabulaire=)
 #   4 : les lignes de commande peintes entières ; affectations et noms de fichiers
-REVISION = 4
+#   5 : aperçu d'un groupe dans une autre palette, filet « --- », sources_palette()
+REVISION = 5
 
 SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 AIDE = "←→ onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"
@@ -74,7 +75,32 @@ def utf8():
     return "utf8" in lang.lower().replace("-", "")
 
 
-def palette_dotlib(relire=False):
+def sources_palette(nom):
+    """D'où vient une palette : {"git": …, "site": …}, les clés absentes quand il n'y a rien.
+
+    Lit share/palettes-sources.tsv, une DONNÉE : une palette ajoutée là n'oblige à toucher aucun
+    programme. Même garantie que le reste de ce module — ni exception, ni dépendance dure : fichier
+    absent, ligne mal formée, palette inconnue → {}. Un appelant affiche ce qu'il reçoit, et rien
+    s'il ne reçoit rien."""
+    dossier = os.environ.get("DOTLIB_DIR") or os.path.expanduser("~/.dotlib")
+    try:
+        with open(os.path.join(dossier, "share", "palettes-sources.tsv"), encoding="utf-8") as f:
+            for ligne in f:
+                if ligne.startswith("#"):
+                    continue
+                champs = ligne.rstrip("\n").split("\t")
+                if champs and champs[0] == nom:
+                    out = {}
+                    for cle, i in (("git", 1), ("site", 2)):
+                        if len(champs) > i and champs[i].strip():
+                            out[cle] = champs[i].strip()
+                    return out
+    except OSError:
+        pass
+    return {}
+
+
+def palette_dotlib(relire=False, nom=None, theme=None):
     """Les couleurs du thème actif du shell — celui que règle « brc theme ».
 
     dotlib publie ses palettes en DONNÉES (share/palettes.tsv : palette, fond, rôle, hexa, index
@@ -95,6 +121,10 @@ def palette_dotlib(relire=False):
     # thème pendant que l'interface tourne, c'est donc le fichier qui dit la vérité et l'environnement
     # qui mentirait — sans cela, appuyer sur Entrée sur un thème ne changeait rien à l'écran.
     palette, fond = ("", "") if relire else (env_palette, env_fond)
+    if nom:
+        palette = nom            # aperçu : une palette DEMANDÉE, sans rien changer au réglage
+    if theme in ("dark", "light"):
+        fond = theme             # … et, si on le demande, dans son autre déclinaison
     if not palette or not fond:
         try:
             with open(os.path.join(dossier, "local", "theme.conf"), encoding="utf-8") as f:
@@ -496,7 +526,8 @@ def ordonner(presents, reference):
 class Onglet:
     """Un onglet : un titre, de quoi produire son contenu (chargé à la première ouverture et gardé)."""
 
-    def __init__(self, titre, produire, genre="texte", action=None, comptes=True, vocabulaire=None):
+    def __init__(self, titre, produire, genre="texte", action=None, comptes=True, vocabulaire=None,
+                 apercu=None):
         self.titre = titre
         # Les noms que CET onglet sait être des commandes, pour qu'ils prennent leur couleur quand une
         # description les cite. Le socle ne les devine pas : lui seul ignore ce qui est une commande
@@ -506,6 +537,9 @@ class Onglet:
         self.genre = genre
         self.comptes = comptes      # False : pas de nombre à côté des noms (groupe de réglage)
         self.action = action
+        # apercu(nom_du_groupe) → {"lignes": [...], "palette": "nord", "theme": "light"} ou None.
+        # Le socle peint ces lignes-là, et elles seules, avec la palette demandée.
+        self.apercu = apercu
         self.contenu = None
         self.total_ecran = 0            # lignes d'écran du dernier rendu (pages, G, compteur)
         # On entre par la LISTE, on choisit une section, puis on entre dedans : c'est l'ordre naturel
@@ -549,9 +583,15 @@ class Interface:
         décoratives : un NAS sous DSM rapporte COLORS=0 malgré des terminfo présents, et
         use_default_colors() comme init_pair() y lèvent — sans try, l'interface ne s'ouvrirait pas
         là où elle marcherait très bien en monochrome."""
-        noms = (("titre", curses.COLOR_YELLOW), ("touche", curses.COLOR_CYAN), ("portee", curses.COLOR_BLUE),
-                ("mauvais", curses.COLOR_RED), ("onglet", curses.COLOR_GREEN),
-                ("commande", curses.COLOR_MAGENTA))
+        noms = self.BASE
+        # DEUX choses distinctes, et les confondre était un défaut : « apercu » est le jeu de paires
+        # EN COURS D'EMPLOI (non nul seulement pendant le tracé du bloc), « cache » garde le dernier
+        # jeu construit pour n'appeler init_pair() qu'au changement de palette. Un seul attribut pour
+        # les deux, et le tracé, en se terminant, effaçait le cache : le dessin suivant retombait
+        # silencieusement sur la palette en service.
+        self.apercu = None
+        self.cache_apercu, self.cache_nom = None, None
+        self.fond = curses.COLOR_BLACK                 # posé avant les retours anticipés (sans couleurs)
         self.paires = dict((n, 0) for n, _ in noms)
         self.paires["choix"] = 0        # surbrillance de la sélection (la paire des correspondances)
         try:
@@ -564,13 +604,11 @@ class Interface:
             return
         try:
             curses.use_default_colors()
-            fond = -1
+            self.fond = -1
         except curses.error:
-            fond = curses.COLOR_BLACK
-        # rôles de dotlib ↔ rôles d'ici : les touches sont des « clés », les titres des « notes »,
-        # la portée un chemin grisé, le mauvais un « bad », l'onglet une date
-        corresp = (("titre", "note"), ("touche", "key"), ("portee", "path"),
-                   ("mauvais", "bad"), ("onglet", "date"), ("commande", "num"))
+            self.fond = curses.COLOR_BLACK
+        fond = self.fond
+        corresp = self.ROLES
         palette = palette_dotlib(relire)
         if palette and getattr(curses, "COLORS", 8) >= 256 and all(r in palette for _, r in corresp):
             for i, (nom, role) in enumerate(corresp, start=1):
@@ -593,8 +631,48 @@ class Interface:
             except curses.error:
                 pass
 
+    def couleurs_apercu(self, nom, theme=None, match=None):
+        """Les paires d'un APERÇU : peindre un bloc avec une palette qui n'est PAS en service.
+
+        Rend un jeu sans couleurs plutôt que les paires en service quand l'aperçu est impossible
+        (moins de 256 couleurs, pas assez de paires, palette inconnue) : montrer les couleurs de la
+        palette ACTIVE en prétendant montrer une autre serait un mensonge, et un mensonge est pire
+        que l'absence de couleur. Le réglage n'est JAMAIS touché : on lit une palette, on l'applique
+        à un bloc de paires à part, et le fichier de thème reste ce qu'il est."""
+        if self.cache_nom == (nom, theme, match):
+            return self.cache_apercu
+        vide = dict((n, 0) for n, _ in self.BASE)
+        vide["choix"] = 0
+        jeu = vide
+        try:
+            if (curses.has_colors() and getattr(curses, "COLORS", 8) >= 256
+                    and curses.COLOR_PAIRS > self.DECALAGE + len(self.ROLES)):
+                palette = palette_dotlib(True, nom, theme)
+                if palette and all(r in palette for _, r in self.ROLES):
+                    jeu = dict(vide)
+                    fond = self.fond
+                    for i, (role_ici, role) in enumerate(self.ROLES, start=self.DECALAGE):
+                        curses.init_pair(i, palette[role], fond)
+                        jeu[role_ici] = curses.color_pair(i)
+                    if match and "match_fg" in palette:
+                        i = self.DECALAGE + len(self.ROLES)
+                        if match == "texte":       # correspondances en TEXTE coloré et gras
+                            curses.init_pair(i, palette["match_fg"], fond)
+                            jeu["choix"] = curses.color_pair(i) | curses.A_BOLD
+                        elif "match_bg" in palette:                       # … ou en FOND coloré
+                            curses.init_pair(i, palette["match_fg"], palette["match_bg"])
+                            jeu["choix"] = curses.color_pair(i)
+        except curses.error:
+            jeu = vide
+        self.cache_nom, self.cache_apercu = (nom, theme, match), jeu
+        return jeu
+
+    def jeu(self):
+        """Les paires à employer : celles de l'aperçu pendant son tracé, celles en service sinon."""
+        return self.apercu or self.paires
+
     def attr(self, nom, gras=False):
-        a = self.paires.get(nom, 0)
+        a = self.jeu().get(nom, 0)
         if not a and nom in ("titre", "onglet"):      # monochrome : garder les repères lisibles
             a = curses.A_BOLD
         return a | curses.A_BOLD if gras else a
@@ -605,6 +683,14 @@ class Interface:
     # de la palette, une commande le rôle « num », une variable la couleur des titres.
     GENRES = {"touche": "touche", "chemin": "portee", "option": "onglet",
               "commande": "commande", "variable": "titre", "terme": "commande"}
+
+    # Correspondance rôle d'ici ↔ rôle de la palette du shell : les touches sont des « clés », les
+    # titres des « notes », la portée un chemin grisé, le mauvais un « bad », l'onglet une date.
+    BASE = (("titre", curses.COLOR_YELLOW), ("touche", curses.COLOR_CYAN), ("portee", curses.COLOR_BLUE),
+            ("mauvais", curses.COLOR_RED), ("onglet", curses.COLOR_GREEN), ("commande", curses.COLOR_MAGENTA))
+    ROLES = (("titre", "note"), ("touche", "key"), ("portee", "path"),
+             ("mauvais", "bad"), ("onglet", "date"), ("commande", "num"))
+    DECALAGE = 8        # les paires d'aperçu vivent au-dessus de celles en service, sans les toucher
 
     def peindre(self, x, texte, fond=0, vocabulaire=(), terme=False):
         """Rend une ligne déjà pliée sous forme de segments [(x, fragment, attr)].
@@ -622,7 +708,7 @@ class Interface:
             # n'y a pas de couleurs, pour que les repères de ligne restent lisibles. Sur un mot au
             # milieu d'une phrase, ce repli mettrait en gras chaque option et chaque variable d'un
             # volet entier. Sans couleurs, la coloration ne doit RIEN faire du tout.
-            attr = self.paires.get(self.GENRES[genre], 0) if genre else 0
+            attr = self.jeu().get(self.GENRES[genre], 0) if genre else 0
             if segments and segments[-1][2] == attr:    # recoller ce qui a la même couleur
                 x0, avant, _ = segments[-1]
                 segments[-1] = (x0, avant + fragment, attr)
@@ -708,7 +794,7 @@ class Interface:
         juste après, ce qui le rendait invisible. Le filet est déjà une zone d'information."""
         self.position = " %d/%d " % (min(debut + hauteur, total), total) if total > hauteur else ''
 
-    def colonne_gauche(self, o, noms, comptes, haut, hauteur):
+    def colonne_gauche(self, o, noms, comptes, haut, hauteur, choix=None):
         """`comptes` à None : aucun nombre à côté des noms. Un décompte de lignes ne veut rien dire
         pour un groupe qui est un RÉGLAGE — « catppuccin 6 » n'informe de rien."""
         o.rang = max(0, min(o.rang, len(noms) - 1))
@@ -721,7 +807,10 @@ class Interface:
             if rang != o.rang:
                 attr = self.attr("titre", True)
             elif o.focus == "gauche":
-                attr = self.paires.get("choix") or curses.A_REVERSE
+                # `choix` fourni : un groupe qui fait l'aperçu d'un réglage de CORRESPONDANCES montre
+                # ici à quoi il ressemble. C'est le seul endroit où ces couleurs servent pour de vrai
+                # — la surbrillance de la sélection — donc le seul endroit où la montrer ne ment pas.
+                attr = choix or self.paires.get("choix") or curses.A_REVERSE
             else:
                 # le focus est à droite : la section choisie reste reconnaissable, sans monopoliser
                 # l'attention — sinon on ne sait plus ce que l'on va déplacer
@@ -794,18 +883,79 @@ class Interface:
             return
         noms = [n for n, _ in groupes]
         comptes = None if not o.comptes else [len(ls) for _, ls in groupes]
-        colonne = self.colonne_gauche(o, noms, comptes, haut, hauteur)
+        o.rang = max(0, min(o.rang, len(noms) - 1))
+        bloc, jeu = self.preparer_apercu(o, noms[o.rang])
+        colonne = self.colonne_gauche(o, noms, comptes, haut, hauteur, jeu and jeu.get("choix"))
         lignes = groupes[o.rang][1]
         # Le volet droit plie comme les autres : sans cela, la description d'un groupe était coupée
         # au bord dès 91 colonnes. La suite est décalée de trois colonnes, comme pour le genre texte.
+        haut, hauteur = self.bloc_apercu(o, bloc, jeu, colonne, haut, hauteur, largeur)
+        o.hauteur = hauteur         # les pages portent sur ce qui DÉFILE, pas sur l'aperçu
         ecran = []
         for l in lignes:
+            if self.filet(l):
+                ecran.append([(colonne + 2, self.h_trait * max(1, largeur - colonne - 3),
+                               self.attr("portee"))])
+                continue
             style = self.style_ligne(l)
             morceaux = plier(l, max(1, largeur - colonne - 3))
             ecran.append(self.peindre(colonne + 2, morceaux[0], style, o.vocabulaire, True))
             for suite in morceaux[1:]:
                 ecran.append(self.peindre(colonne + 5, suite, style, o.vocabulaire))
         self.rendre(o, ecran, haut, hauteur, largeur)
+
+    def preparer_apercu(self, o, groupe):
+        """Ce que le groupe demande, et les paires correspondantes — avant tout tracé, parce que la
+        colonne de gauche en a besoin pour montrer les correspondances."""
+        if not o.apercu:
+            return None, None
+        try:
+            bloc = o.apercu(groupe) or {}
+        except Exception:                      # un producteur d'aperçu ne fait pas tomber l'onglet
+            return None, None
+        if not bloc.get("lignes"):
+            return None, None
+        return bloc, self.couleurs_apercu(bloc.get("palette"), bloc.get("theme"), bloc.get("match"))
+
+    def bloc_apercu(self, o, bloc, jeu, colonne, haut, hauteur, largeur):
+        """L'APERÇU d'un groupe : quelques lignes en tête du volet, peintes avec une AUTRE palette.
+
+        En tête et hors défilement, à dessein : c'est une zone de comparaison, et passer d'un thème
+        au suivant ne doit pas la faire bouger sous les yeux. Elle ne change RIEN au réglage — on lit
+        une palette, on l'applique à un bloc de paires à part, et le fichier de thème reste ce qu'il
+        est tant que l'utilisateur n'a pas validé.
+
+        Rend le haut et la hauteur de ce qui reste pour le contenu qui défile."""
+        if not bloc:
+            return haut, hauteur
+        demo = list(bloc["lignes"])
+        if hauteur < 6:                        # trop court pour couper le volet en deux : pas d'aperçu
+            return haut, hauteur
+        demo = demo[: max(1, (hauteur - 2) // 2)]
+        largeur_utile = max(1, largeur - colonne - 3)
+        self.apercu = jeu
+        try:
+            for i, l in enumerate(demo):
+                if self.filet(l):
+                    self.ecrire(haut + i, colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))
+                    continue
+                for x, texte, attr in self.peindre(colonne + 2, plier(l, largeur_utile)[0],
+                                                   self.style_ligne(l), o.vocabulaire, True):
+                    self.ecrire(haut + i, x, texte, attr)
+        finally:
+            self.apercu = None                 # le reste de l'interface garde la palette EN SERVICE
+        self.ecrire(haut + len(demo), colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))
+        return haut + len(demo) + 1, hauteur - len(demo) - 1
+
+    @staticmethod
+    def filet(l):
+        """Une ligne de trois tirets et plus, et rien d'autre : un FILET sur toute la largeur.
+
+        Cinquième repère, ajouté parce qu'un appelant ne peut pas le faire lui-même sans se tromper :
+        écrire « ──── » à la main donne des « [?] » sous une locale non UTF-8, et c'est au socle de
+        choisir le caractère selon le terminal."""
+        nu = l.strip()
+        return len(nu) >= 3 and set(nu) <= set("-\u2500")
 
     def style_ligne(self, l):
         nu = l.strip()
@@ -827,6 +977,9 @@ class Interface:
         # couramment des lignes de 90 à 110 caractères (chemin, branche, commit, thème sur une ligne).
         ecran = []
         for l in lignes:
+            if self.filet(l):
+                ecran.append([(1, self.h_trait * max(1, largeur - 3), self.attr("portee"))])
+                continue
             style = self.style_ligne(l)
             morceaux = plier(l, max(1, largeur - 2))
             ecran.append(self.peindre(1, morceaux[0], style, o.vocabulaire, True))

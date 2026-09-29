@@ -1,0 +1,16 @@
+# palettes-sources.tsv — d'où vient chaque palette : dépôt, et site quand il existe.
+# Une colonne vide = pas de source de ce type. Vérifiées (HTTP 200, sans redirection) le 29/09/2026.
+# DONNÉE, pas code : une palette ajoutée ici ne demande aucune modification d'un programme.
+#
+# palette	git	site
+catppuccin	https://github.com/catppuccin/catppuccin	https://catppuccin.com
+edge	https://github.com/sainnhe/edge	
+everforest	https://github.com/sainnhe/everforest	
+gruvbox	https://github.com/morhetz/gruvbox	
+lucius	https://github.com/jonathanfilip/vim-lucius	
+nord	https://github.com/nordtheme/nord	https://www.nordtheme.com
+papercolor	https://github.com/NLKNguyen/papercolor-theme	
+pencil	https://github.com/preservim/vim-colors-pencil	
+solarized	https://github.com/altercation/solarized	https://ethanschoonover.com/solarized/
+tokyonight	https://github.com/folke/tokyonight.nvim	
+xterm		
