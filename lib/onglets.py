@@ -33,6 +33,13 @@ API = 1
 # Les versions que ce module sert ENCORE. Un appelant sans copie de repli lit ceci pour savoir s'il
 # peut s'en servir ; quand API passera à 2, la 1 y restera le temps qu'il adapte et teste.
 API_COMPATIBLES = (1,)
+# Numéro de RÉVISION, incrémenté à chaque AJOUT au contrat (l'API, elle, ne bouge pas : un ajout ne
+# casse personne). Il existe parce qu'un appelant ne pouvait pas savoir si le module qu'il a en face
+# porte l'ajout dont il a besoin : « API 1 » ne distingue pas le module d'hier de celui d'aujourd'hui.
+# Un appelant qui emploie une nouveauté teste « onglets.REVISION >= n » ; sans cela il tombe sur une
+# TypeError, c'est-à-dire un défaut chez lui pour une insuffisance chez nous.
+#   1 : API 1 d'origine · 2 : genre « groupes » et `action` au contrat, et `comptes=`
+REVISION = 2
 
 SGR = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 AIDE = "←→ onglet · ↑↓ déplacer · PgUp/PgDn page · / filtrer · r recharger · q quitter"

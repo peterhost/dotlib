@@ -95,6 +95,17 @@ fichier. L'appelant pose `sys.dont_write_bytecode = True` avant d'importer (aucu
 
 `onglets.API` — entier, vaut `1`.
 `onglets.API_COMPATIBLES` — tuple des versions que ce module sert encore, vaut `(1,)`.
+`onglets.REVISION` — entier, incrémenté à chaque AJOUT au contrat ; l'API ne bouge pas pour autant.
+
+Un ajout ne casse personne, mais **un appelant qui emploie une nouveauté doit pouvoir savoir si le
+module qu'il a en face la porte** : « API 1 » ne distingue pas le module d'hier de celui
+d'aujourd'hui. D'où ce numéro. Le cas s'est produit : un appelant a passé un paramètre ajouté la
+veille à un module plus ancien, et a récolté une `TypeError` — un défaut chez lui pour une
+insuffisance chez nous. Testez `onglets.REVISION >= n` avant d'employer une nouveauté, ou
+construisez sans elle.
+
+    1 : API 1 d'origine
+    2 : genre « groupes » et `action` au contrat, paramètre `comptes=`
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
