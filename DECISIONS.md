@@ -36,3 +36,25 @@ pouvoir reprendre dotlib en lisant API.md, CLAUDE.md, ce journal et les tests.
   **Une seule obligation pour les appelants : séparer les deux colonnes d'un volet aligné par au
   moins deux espaces.** C'est le seul indice qui distingue un sujet d'une phrase, où les mots sont
   séparés par un seul espace.
+- **Où vit quoi : dotlib porte ce qu'on LIT en commun, pas ce qui modifie une machine** (29/09/2026).
+  Question posée à propos d'un outil qui patche une police de terminal pour lui ajouter les glyphes
+  arrondis. Il n'entre pas ici, et la raison vaut au-delà du cas : ce dépôt est **public** (documenter
+  la modification d'une police non redistribuable n'y a pas sa place), il doit tourner sur des machines
+  qu'on ne choisit pas **sans aucune dépendance** (un patcheur veut fontforge : ce serait la première
+  dépendance dure), et il **n'est pas une bibliothèque à la recherche d'usagers**. La frontière :
+  dotlib porte ce que plusieurs configurations doivent LIRE en commun — un réglage, une palette, une
+  donnée ; ce qui MODIFIE une machine reste chez celui qui l'administre. `DOTLIB_PILL_ROUND` est du
+  premier côté, l'outil qui patche la police du second. Un outil extérieur peut CONSEILLER de poser ce
+  réglage, il ne l'écrit pas lui-même.
+- **Les arrondis de la pastille sont le défaut, et ne dépendent plus du terminal DÉCLARÉ** (29/09/2026).
+  Ils n'apparaissaient que si `DOTLIB_TERM=warp`, donc jamais à travers ssh. Erreur de raisonnement et
+  non oubli : **c'est le terminal qui AFFICHE qui dessine ces glyphes**, pas l'hôte qui les émet.
+  L'hôte distant n'a donc rien à savoir ni rien à installer — et il ne PEUT rien savoir, puisque aucune
+  variable ne traverse ssh vers les NAS. D'où un défaut fondé sur ce qui est vérifiable partout : la
+  locale est en UTF-8 et ce n'est pas la console. `DOTLIB_PILL_ROUND=0` dans le `local/` d'une machine
+  dont la police n'a pas ces glyphes.
+- **`DOTLIB_REVISION` côté shell, comme `REVISION` côté Python** (29/09/2026). `DOTLIB_API` ne
+  distingue pas le dotlib d'hier de celui d'aujourd'hui, et un appelant ne pouvait donc pas savoir si
+  l'ajout dont il a besoin est là. Côté shell, l'absence se paie plus cher : `dotlib_pill -p BAD x T`
+  sur une version ancienne prend `-p` pour un nom de couleur et rend une pastille fausse **sans lever
+  d'erreur**. Une dégradation silencieuse vaut moins qu'une erreur franche.
