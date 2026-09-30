@@ -44,7 +44,8 @@ API_COMPATIBLES = (1,)
 #   5 : aperçu d'un groupe dans une autre palette, filet « --- », sources_palette()
 #   6 : Quitter(valeur) — sortir de l'interface avec une valeur, code 5, onglets.QUITTE
 #   7 : Onglet(aide=) — une aide par onglet, touche « ? », grande fenêtre
-REVISION = 7
+#   8 : aperçu de lignes PRÉ-COLORÉES — apercu() rend {"brut": True}, couleur256(), decouper_sgr()
+REVISION = 8
 
 class Quitter(Exception):
     """Lever ceci depuis une action FERME l'interface et rend le code 5, avec une valeur pour l'appelant.
@@ -469,6 +470,86 @@ def decouper(texte, vocabulaire=(), terme=False):
     return out or [(texte, "")]
 
 
+def couleur256(r, g, b):
+    """Le plus proche des 256 indices d'un terminal, pour une couleur 24 bits.
+
+    Pourquoi convertir plutôt qu'employer la vraie couleur : curses ne sait la changer qu'avec
+    can_change_color(), que presque aucun terminal n'accorde — et qui modifierait la palette du
+    terminal lui-même, donc l'affichage de tout ce qui l'entoure. Un aperçu n'a pas à repeindre
+    l'écran de l'utilisateur pour se montrer.
+
+    Deux candidats sont comparés : le cube 6×6×6 (16-231) et la rampe de gris (232-255). Le gris
+    gagne souvent sur les couleurs peu saturées — fonds de barres de statut, justement — et l'oublier
+    donnait des gris bleutés là où le thème en voulait des neutres."""
+    niveaux = (0, 95, 135, 175, 215, 255)
+
+    def proche(v):
+        return min(range(6), key=lambda i: abs(niveaux[i] - v))
+
+    ri, gi, bi = proche(r), proche(g), proche(b)
+    cube = (16 + 36 * ri + 6 * gi + bi,
+            (niveaux[ri] - r) ** 2 + (niveaux[gi] - g) ** 2 + (niveaux[bi] - b) ** 2)
+    moyen = (r + g + b) // 3
+    i = min(23, max(0, (moyen - 8 + 5) // 10))
+    v = 8 + 10 * i
+    gris = (232 + i, (v - r) ** 2 + (v - g) ** 2 + (v - b) ** 2)
+    return (cube if cube[1] <= gris[1] else gris)[0]
+
+
+# Les séquences qu'on sait lire dans une ligne PRÉ-COLORÉE : couleurs 256, couleurs 24 bits, gras,
+# remise à zéro. Tout le reste (soulignement, inverse, clignotement…) est ignoré sans bruit : mieux
+# vaut une ligne juste en couleur et plate en attributs qu'un refus d'afficher.
+_SGR_BRUT = re.compile(r"\033\[([0-9;]*)m")
+
+
+def decouper_sgr(ligne):
+    """Découpe une ligne pré-colorée en [(texte, fond, texte_couleur, gras)].
+
+    `fond` et `texte_couleur` : un index 256, ou None pour « celle du terminal ». Les couleurs 24 bits
+    sont ramenées au plus proche des 256 (voir couleur256). Fonction de texte : ni curses, ni terminal,
+    donc éprouvable seule."""
+    out, pos, fg, bg, gras = [], 0, None, None, False
+    for m in _SGR_BRUT.finditer(ligne):
+        if m.start() > pos:
+            out.append((ligne[pos:m.start()], bg, fg, gras))
+        pos = m.end()
+        codes = [c for c in m.group(1).split(";") if c != ""] or ["0"]
+        i = 0
+        while i < len(codes):
+            try:
+                c = int(codes[i])
+            except ValueError:
+                i += 1
+                continue
+            if c == 0:
+                fg, bg, gras = None, None, False
+            elif c == 1:
+                gras = True
+            elif c == 22:
+                gras = False
+            elif c in (38, 48) and i + 1 < len(codes):
+                cible = "fg" if c == 38 else "bg"
+                if codes[i + 1] == "5" and i + 2 < len(codes):
+                    v = int(codes[i + 2]); i += 2
+                elif codes[i + 1] == "2" and i + 4 < len(codes):
+                    v = couleur256(int(codes[i + 2]), int(codes[i + 3]), int(codes[i + 4])); i += 4
+                else:
+                    i += 1
+                    continue
+                if cible == "fg":
+                    fg = v
+                else:
+                    bg = v
+            elif c == 39:
+                fg = None
+            elif c == 49:
+                bg = None
+            i += 1
+    if pos < len(ligne):
+        out.append((ligne[pos:], bg, fg, gras))
+    return [x for x in out if x[0]]
+
+
 def borne(haut, total, hauteur):
     """Première ligne à afficher, ramenée dans le possible : jamais négative, jamais au-delà de la
     dernière page. Sortie du dessin pour être éprouvée sans terminal — dans un pseudo-terminal, curses
@@ -517,6 +598,10 @@ def ascii_lisible(texte):
     plat = "".join(c for c in plat if not unicodedata.combining(c))
     # Ce qui reste n'est pas représentable : on l'AVOUE entre crochets. Un « ? » nu se lirait comme
     # la touche « ? », ce qui est pire que de ne rien dire — au milieu d'une liste de touches surtout.
+    # Les glyphes Powerline (zone privée E0B0-E0BF : arrondis, flèches, séparateurs) deviennent des
+    # ESPACES, pas des « [?] » : ils ne portent aucun sens, ils dessinent une bordure. Les avouer
+    # entre crochets ferait du bruit là où il n'y a rien à dire.
+    plat = "".join(" " if 0xE0B0 <= ord(c) <= 0xE0BF else c for c in plat)
     return "".join(c if ord(c) < 127 else "[?]" for c in plat)
 
 
@@ -630,6 +715,7 @@ class Interface:
         # silencieusement sur la palette en service.
         self.apercu = None
         self.cache_apercu, self.cache_nom = None, None
+        self.cache_brut = {}            # (texte, fond) → paire, pour les lignes pré-colorées
         self.fond = curses.COLOR_BLACK                 # posé avant les retours anticipés (sans couleurs)
         self.paires = dict((n, 0) for n, _ in noms)
         self.paires["choix"] = 0        # surbrillance de la sélection (la paire des correspondances)
@@ -706,6 +792,30 @@ class Interface:
         self.cache_nom, self.cache_apercu = (nom, theme, match), jeu
         return jeu
 
+    def paire_brute(self, fg, bg):
+        """Une paire de couleurs pour une ligne PRÉ-COLORÉE, allouée à la demande et gardée.
+
+        Rend None quand on ne peut pas tenir la promesse — moins de 256 couleurs, ou plus de paires
+        libres. L'appelant écrit alors le texte NU. Une couleur approchée au hasard serait pire que
+        pas de couleur : l'aperçu d'un thème n'a d'intérêt que s'il montre le thème."""
+        if fg is None and bg is None:
+            return 0
+        cle = (fg, bg)
+        if cle in self.cache_brut:
+            return self.cache_brut[cle]
+        try:
+            if not curses.has_colors() or getattr(curses, "COLORS", 8) < 256:
+                return None
+            n = self.DECALAGE_BRUT + len(self.cache_brut)
+            if n >= curses.COLOR_PAIRS:
+                return None
+            curses.init_pair(n, self.fond if fg is None else fg, self.fond if bg is None else bg)
+            attr = curses.color_pair(n)
+        except curses.error:
+            return None
+        self.cache_brut[cle] = attr
+        return attr
+
     def jeu(self):
         """Les paires à employer : celles de l'aperçu pendant son tracé, celles en service sinon."""
         return self.apercu or self.paires
@@ -730,6 +840,7 @@ class Interface:
     ROLES = (("titre", "note"), ("touche", "key"), ("portee", "path"),
              ("mauvais", "bad"), ("onglet", "date"), ("commande", "num"))
     DECALAGE = 8        # les paires d'aperçu vivent au-dessus de celles en service, sans les toucher
+    DECALAGE_BRUT = 16  # et celles des lignes pré-colorées au-dessus des deux, allouées à la demande
 
     def peindre(self, x, texte, fond=0, vocabulaire=(), terme=False):
         """Rend une ligne déjà pliée sous forme de segments [(x, fragment, attr)].
@@ -979,6 +1090,25 @@ class Interface:
         # Les lignes d'aperçu se REPLIENT comme le reste, au lieu d'être coupées au bord : une
         # démonstration tronquée montre une couleur sans montrer ce qu'elle qualifie, et le texte
         # disparaissait en silence. C'est donc le nombre de lignes d'ÉCRAN qui borne le bloc.
+        if bloc.get("brut"):
+            # Lignes PRÉ-COLORÉES : affichées telles quelles, sans la grammaire. Une barre de statut
+            # est faite de fonds précis et d'arrondis ; nos rôles ne savent pas la reproduire, et un
+            # aperçu qui montrerait autre chose que la barre réelle serait pire qu'absent.
+            lignes = list(bloc["lignes"])[: max(1, (hauteur - 2) // 2)]
+            for i, brute in enumerate(lignes):
+                x = colonne + 2
+                for texte, bg, fg, gras in decouper_sgr(brute):
+                    attr = self.paire_brute(fg, bg)
+                    if attr is None:
+                        attr = 0            # promesse intenable : texte nu, jamais une couleur fausse
+                    elif gras:
+                        attr |= curses.A_BOLD
+                    if not self.utf8:
+                        texte = ascii_lisible(texte)
+                    self.ecrire(haut + i, x, texte[: max(0, largeur_utile - (x - colonne - 2))], attr)
+                    x += len(texte)
+            self.ecrire(haut + len(lignes), colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))
+            return haut + len(lignes) + 1, hauteur - len(lignes) - 1
         self.apercu = jeu
         try:
             ecran = []

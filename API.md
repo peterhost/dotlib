@@ -135,6 +135,7 @@ construisez sans elle.
     5 : `Onglet(apercu=)`, repère `---`, `sources_palette()`
     6 : `Quitter(valeur)` — sortir de l'interface avec une valeur, code 5, `onglets.QUITTE`
     7 : `Onglet(aide=)` — une aide par onglet, touche « ? », grande fenêtre
+    8 : aperçu de lignes PRÉ-COLORÉES (`{"brut": True}`), `couleur256()`, `decouper_sgr()`
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
@@ -196,6 +197,10 @@ testent — l'un d'eux n'a aucune copie de repli.
   Ne jamais utiliser `locale.getpreferredencoding()` : depuis Python 3.7 il rend `utf-8` même sous
   `LC_ALL=C` (PEP 538/540), donc tout repli ASCII fondé sur lui est du code mort.
 - `onglets.ordonner(presents, reference)` → les présents dans l'ordre de référence, les autres à la suite.
+- `onglets.couleur256(r, g, b)` → l'index 256 le plus proche. Compare le cube 6×6×6 ET la rampe de
+  gris : celle-ci gagne souvent sur les couleurs peu saturées — les fonds de barres de statut, justement.
+- `onglets.decouper_sgr(ligne)` → `[(texte, fond, texte_couleur, gras), …]`, index 256 ou `None`.
+  Sans curses ni terminal, donc éprouvable seule.
 - `onglets.borne(haut, total, hauteur)` → première ligne à afficher, ramenée dans le possible. Publique
   parce qu'elle est la seule façon d'éprouver un défilement SANS terminal : dans un pseudo-terminal,
   curses n'émet que les caractères qui changent d'une image à l'autre, donc chercher un texte dans le
@@ -255,6 +260,17 @@ Ces lignes sont peintes **avec la palette demandée**, en tête du volet de droi
 défilement** : c'est une zone de comparaison, et passer d'un thème au suivant ne doit pas la faire
 bouger sous les yeux. Un filet la sépare du contenu ordinaire, qui défile en dessous et garde la
 palette **en service**, comme tout le reste de l'interface.
+
+**Lignes déjà colorées** — `{"lignes": [...], "brut": True}`. Elles sont affichées **telles quelles**,
+sans la grammaire : une barre de statut tmux est faite de fonds précis et d'arrondis Powerline, que
+des rôles ne savent pas reproduire, et un aperçu qui montrerait autre chose que la barre réelle
+serait pire qu'absent. Sont lues : `38;5;N`, `48;5;N`, `38;2;R;G;B`, `48;2;R;G;B`, `1`, `22`, `39`,
+`49`, `0` ; le reste est ignoré sans bruit. Les couleurs 24 bits sont ramenées au plus proche des 256
+(`couleur256`) : `curses.init_color` exige `can_change_color()`, que presque aucun terminal n'accorde,
+et qui repeindrait la palette du terminal lui-même. Les paires sont allouées **à la demande** et
+gardées ; quand il n'y en a plus, ou en dessous de 256 couleurs, le texte s'affiche **nu** — jamais
+une couleur approchée au hasard. Sans UTF-8, les glyphes Powerline deviennent des **espaces** : ils
+dessinent une bordure, ils ne disent rien.
 
 Garanties, dans l'ordre où elles comptent :
 

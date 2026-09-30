@@ -231,6 +231,64 @@ else
   ok "aide : recouvrement non mesuré (tmux absent — c'est le seul instrument pour un rendu)"
 fi
 
+# LIGNES PRÉ-COLORÉES : une barre de statut tmux est faite de fonds précis et d'arrondis ; nos rôles
+# ne savent pas la reproduire, et un aperçu qui montrerait autre chose que la barre réelle serait pire
+# qu'absent. On l'affiche donc telle quelle. Les deux fonctions de lecture sont pures : éprouvées sans
+# terminal, comme le reste de ce qui peut l'être.
+out=$(cd "$TMP" && $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+from onglets import couleur256, decouper_sgr
+E = chr(27) + "["
+cas = [((255, 0, 0), 196), ((0, 0, 0), 16), ((255, 255, 255), 231),
+       ((0x34, 0x3f, 0x44), 237), ((0xa7, 0xc0, 0x80), 144)]
+ok = all(couleur256(*c) == a for c, a in cas)
+d = decouper_sgr(E + "38;5;235m" + E + "48;2;167;192;128m" + " x " + E + "0m" + "nu")
+ok = ok and d == [(" x ", 144, 235, False), ("nu", None, None, False)]
+g = decouper_sgr(E + "1m" + E + "38;5;9m" + "gras" + E + "22m" + "plat")
+ok = ok and g == [("gras", None, 9, True), ("plat", None, 9, False)]
+ok = ok and decouper_sgr("rien du tout") == [("rien du tout", None, None, False)]
+print("ok" if ok else "KO %r %r" % (d, g))' 2>&1)
+[ "$out" = ok ] && ok "brut : 24 bits ramenés au plus proche des 256, séquences lues (gras, 39/49, 0)" \
+  || ko "brut : lecture des séquences" "$out"
+
+# … et le rendu, dans tmux : seul un vrai terminal dit ce qui est à l'écran.
+if command -v tmux >/dev/null 2>&1; then
+  cat > "$TMP/brut.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+E = "\033["
+B = {"vert": E+"48;2;167;192;128m"+E+"38;5;235m"+" AAA "+E+"0m"+E+"38;2;167;192;128m"+"\ue0b0"+E+"0m",
+     "bleu": E+"48;2;100;140;220m"+E+"38;5;235m"+" BBB "+E+"0m"}
+o = [onglets.Onglet("B", lambda: [(n, ["detail"]) for n in B], genre="groupes",
+                    apercu=lambda n: {"lignes": [B[n], ""], "brut": True})]
+sys.exit(onglets.lancer(o, "brut"))
+P
+  S=dotlib-brut-$$
+  tmux kill-session -t "$S" 2>/dev/null
+  tmux new-session -d -s "$S" -x 100 -y 24 2>/dev/null \
+    && tmux send-keys -t "$S" "env ONGLETS_DIR=$TMP TERM=xterm-256color LANG=en_US.UTF-8 $PY $TMP/brut.py" Enter \
+    && sleep 3 && tmux capture-pane -p -e -t "$S" > "$TMP/brut1.txt" \
+    && tmux send-keys -t "$S" Down && sleep 2 && tmux capture-pane -p -e -t "$S" > "$TMP/brut2.txt"
+  tmux kill-session -t "$S" 2>/dev/null
+  if [ -s "$TMP/brut1.txt" ]; then
+    grep -q "48;5;144m AAA " "$TMP/brut1.txt" && ok "brut : la barre s'affiche avec SES couleurs (fond 144)" \
+      || ko "brut : couleurs absentes" "$(grep -o '48;5;[0-9]*m A*' "$TMP/brut1.txt" | head -2)"
+    ARC=$(printf '\356\202\260')      # U+E0B0 en UTF-8, en octal : le shell ne mange rien ici
+    LC_ALL=C grep -qF "$ARC" "$TMP/brut1.txt" && ok "brut : l'arrondi powerline est à l'écran" \
+      || ko "brut : arrondi absent"
+    grep -q "48;5;68m BBB \|48;5;[0-9]*m BBB " "$TMP/brut2.txt" \
+      && ok "brut : changer de groupe change la barre" || ko "brut : la barre ne suit pas la sélection"
+  else
+    ok "brut : rendu non mesuré (tmux n'a pas démarré ici)"
+  fi
+fi
+# Sans couleurs : texte NU, jamais une couleur fausse — un aperçu faux vaut moins qu'un aperçu absent.
+out=$(lance '5q' TERM=vt100 LANG=en_US.UTF-8)
+printf '%s' "$out" | LC_ALL=C grep -q "$E\[48;5;" && ko "brut vt100 : des couleurs 256 émises" \
+  || ok "brut : sans couleurs, rien n'est peint"
+
 # 5 quater. SORTIR AVEC UNE VALEUR : certaines choses ne peuvent se faire qu'une fois le terminal
 # rendu — attacher une session tmux en est le cas d'école, puisque curses tient le terminal. Une action
 # lève Quitter(valeur) ; l'interface se ferme, rend 5, et l'appelant lit onglets.QUITTE. Le socle
