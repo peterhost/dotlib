@@ -1122,8 +1122,11 @@ class Interface:
                 ecran.append(self.peindre(x0 + 4, suite, style, o.vocabulaire))
         o.aide_haut = borne(o.aide_haut, len(ecran), interieur)
         for i in range(interieur):
-            self.ecrire(y0 + 1 + i, x0, self.v_trait, cadre)
-            self.ecrire(y0 + 1 + i, x0 + larg - 1, self.v_trait, cadre)
+            # EFFACER d'abord toute la largeur intérieure. Sans cela, chaque ligne n'écrivait que ses
+            # propres caractères et laissait voir l'onglet dessous partout ailleurs — des fins de
+            # lignes, un séparateur, des restes de mots au milieu du texte d'aide. Une fenêtre qui
+            # recouvre doit recouvrir : curses ne le fait pas pour nous, il n'y a qu'un seul plan.
+            self.ecrire(y0 + 1 + i, x0, self.v_trait + " " * max(0, larg - 2) + self.v_trait, cadre)
             for x, texte, attr in (ecran[o.aide_haut + i] if o.aide_haut + i < len(ecran) else []):
                 self.ecrire(y0 + 1 + i, x, texte[: max(0, x0 + larg - 2 - x)], attr)
         touches = ("↑↓ PgUp/PgDn g G défiler · Échap ou q fermer" if self.utf8

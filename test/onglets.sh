@@ -197,6 +197,40 @@ out=$(lance '4?qq' TERM=vt100 LANG=en_US.UTF-8)
 printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "aide vt100 : des couleurs émises" \
   || ok "aide : sans couleurs, aucune séquence de couleur"
 
+# L'aide RECOUVRE ce qu'elle cache. Éprouvé dans tmux et non dans un pseudo-terminal : c'est un
+# rendu, et le flux de « script » est un diff d'images où l'on ne peut rien conclure. Défaut trouvé
+# en vrai : la fenêtre dessinait son cadre et son texte, mais chaque ligne laissait voir l'onglet
+# dessous partout où elle n'écrivait pas — fins de lignes, séparateurs, restes de mots.
+if command -v tmux >/dev/null 2>&1; then
+  cat > "$TMP/couvre.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+o = [onglets.Onglet("G", lambda: [("a", ["DESSOUS-%d%sFIN-DESSOUS" % (i, " " * 40) for i in range(25)])],
+                    genre="groupes", aide=lambda: ["== Aide"] + ["ligne %d" % i for i in range(30)])]
+sys.exit(onglets.lancer(o, "couvre"))
+P
+  S=dotlib-aide-$$
+  tmux kill-session -t "$S" 2>/dev/null
+  tmux new-session -d -s "$S" -x 110 -y 30 2>/dev/null \
+    && tmux send-keys -t "$S" "env ONGLETS_DIR=$TMP TERM=xterm-256color LANG=en_US.UTF-8 $PY $TMP/couvre.py" Enter \
+    && sleep 3 && tmux send-keys -t "$S" "?" && sleep 2 \
+    && tmux capture-pane -p -t "$S" > "$TMP/couvre.txt"
+  tmux kill-session -t "$S" 2>/dev/null
+  if [ -s "$TMP/couvre.txt" ]; then
+    grep -q 'FIN-DESSOUS' "$TMP/couvre.txt" \
+      && ko "aide : l'onglet transparaît sous la fenêtre" "$(grep -m2 'FIN-DESSOUS' "$TMP/couvre.txt")" \
+      || ok "aide : la fenêtre recouvre vraiment (rien de l'onglet ne transparaît)"
+    grep -q 'ligne 5' "$TMP/couvre.txt" && ok "aide : son contenu est bien affiché" \
+      || ko "aide : contenu absent" "$(head -4 "$TMP/couvre.txt")"
+  else
+    ok "aide : recouvrement non mesuré (tmux n'a pas démarré ici)"
+  fi
+else
+  ok "aide : recouvrement non mesuré (tmux absent — c'est le seul instrument pour un rendu)"
+fi
+
 # 5 quater. SORTIR AVEC UNE VALEUR : certaines choses ne peuvent se faire qu'une fois le terminal
 # rendu — attacher une session tmux en est le cas d'école, puisque curses tient le terminal. Une action
 # lève Quitter(valeur) ; l'interface se ferme, rend 5, et l'appelant lit onglets.QUITTE. Le socle
