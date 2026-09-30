@@ -43,7 +43,8 @@ API_COMPATIBLES = (1,)
 #   4 : les lignes de commande peintes entières ; affectations et noms de fichiers
 #   5 : aperçu d'un groupe dans une autre palette, filet « --- », sources_palette()
 #   6 : Quitter(valeur) — sortir de l'interface avec une valeur, code 5, onglets.QUITTE
-REVISION = 6
+#   7 : Onglet(aide=) — une aide par onglet, touche « ? », grande fenêtre
+REVISION = 7
 
 class Quitter(Exception):
     """Lever ceci depuis une action FERME l'interface et rend le code 5, avec une valeur pour l'appelant.
@@ -468,6 +469,14 @@ def decouper(texte, vocabulaire=(), terme=False):
     return out or [(texte, "")]
 
 
+def borne(haut, total, hauteur):
+    """Première ligne à afficher, ramenée dans le possible : jamais négative, jamais au-delà de la
+    dernière page. Sortie du dessin pour être éprouvée sans terminal — dans un pseudo-terminal, curses
+    n'émet que les caractères qui CHANGENT d'une image à l'autre, donc chercher un texte dans le flux
+    ne prouve rien sur ce qui est à l'écran."""
+    return max(0, min(haut, max(0, total - hauteur)))
+
+
 def plier(texte, largeur):
     """Replie un texte sur autant de lignes d'écran qu'il en faut, en coupant sur les espaces.
 
@@ -550,7 +559,7 @@ class Onglet:
     """Un onglet : un titre, de quoi produire son contenu (chargé à la première ouverture et gardé)."""
 
     def __init__(self, titre, produire, genre="texte", action=None, comptes=True, vocabulaire=None,
-                 apercu=None):
+                 apercu=None, aide=None):
         self.titre = titre
         # Les noms que CET onglet sait être des commandes, pour qu'ils prennent leur couleur quand une
         # description les cite. Le socle ne les devine pas : lui seul ignore ce qui est une commande
@@ -560,6 +569,11 @@ class Onglet:
         self.genre = genre
         self.comptes = comptes      # False : pas de nombre à côté des noms (groupe de réglage)
         self.action = action
+        # aide() → liste de lignes, montrée par « ? » dans une grande fenêtre. Chargée à la première
+        # ouverture et gardée, comme un producteur. Sans elle, la touche n'existe pas.
+        self.aide = aide
+        self.aide_contenu = None
+        self.aide_haut = 0
         # apercu(nom_du_groupe) → {"lignes": [...], "palette": "nord", "theme": "light"} ou None.
         # Le socle peint ces lignes-là, et elles seules, avec la palette demandée.
         self.apercu = apercu
@@ -592,12 +606,14 @@ class Interface:
         self.nom = nom
         self.actif = 0
         self.filtre = ""
+        self.aide_ouverte = False       # la grande fenêtre d'aide recouvre tout, sans rien changer dessous
         self.saisie = False
         self.message = ""
         self.paires = {}
         self.position = ""              # « 12/86 », écrit par pied() dans son filet
         self.utf8 = utf8()
         self.h_trait, self.v_trait = ("─", "│") if self.utf8 else ("-", "|")
+        self.coins = ("┌", "┐", "└", "┘") if self.utf8 else ("+", "+", "+", "+")
 
     # --- couleurs : celles de base du terminal, seulement s'il en a assez ; sinon monochrome ----------
     def couleurs(self, relire=False):
@@ -794,6 +810,9 @@ class Interface:
             aide = ("[%s] Tab change de volet · " % ("liste" if o.focus == "gauche" else "contenu")) + aide
         if o.genre == "groupes" and o.action:
             aide = "Entrée appliquer · " + aide
+        if o.aide:
+            # annoncée là où les touches sont annoncées : une aide qu'on ne sait pas demander n'existe pas
+            aide = ("? aide · " if self.utf8 else "? aide . ") + aide
         if self.saisie:
             self.ecrire(h - 1, 0, "  filtre : " + self.filtre + "_", curses.A_BOLD)
         elif self.message:
@@ -1062,8 +1081,58 @@ class Interface:
             raise
         except Exception as e:                       # un onglet cassé ne ferme pas l'interface
             self.ecrire(haut + 1, 2, "onglet illisible : %s" % e, self.attr("mauvais"))
+        if self.aide_ouverte:
+            self.dessiner_aide(o, h, l)
         self.pied()
         self.ecran.refresh()
+
+    def dessiner_aide(self, o, h, l):
+        """L'aide de l'onglet, par-dessus tout le reste. Elle ne touche à RIEN dessous : ni sélection,
+        ni défilement, ni filtre. On la ferme et on retrouve l'onglet exactement comme on l'a laissé.
+
+        Neuf dixièmes de l'écran quand il y a la place, tout l'écran quand il n'y en a pas : des marges
+        sur un terminal étroit ne laisseraient plus rien pour le texte, et c'est le texte qu'on vient
+        lire."""
+        if o.aide_contenu is None:
+            try:
+                o.aide_contenu = list(o.aide() or [])
+            except Quitter:
+                raise
+            except Exception as e:                   # une aide cassée ne ferme pas l'onglet
+                o.aide_contenu = ["aide illisible : %s" % e]
+        hg, hd, bg, bd = self.coins
+        x0 = 0 if l < 60 else max(1, l // 20)
+        y0 = 0 if h < 16 else 1
+        larg, haut = l - 2 * x0, h - 2 * y0 - 1
+        cadre = self.attr("portee")
+        self.ecrire(y0, x0, (hg + self.h_trait * max(0, larg - 2) + hd)[:larg], cadre)
+        self.ecrire(y0, x0 + 2, (" Aide — %s " % o.titre)[: max(0, larg - 4)], self.attr("titre", True))
+        interieur = max(1, haut - 2)
+        # Le contenu se plie, se colore et porte les mêmes repères que les onglets « texte » : une
+        # aide est du texte de cet outil, pas un objet à part qui aurait ses propres règles.
+        ecran = []
+        for ligne in o.aide_contenu:
+            if self.filet(ligne):
+                ecran.append([(x0 + 2, self.h_trait * max(1, larg - 4), cadre)])
+                continue
+            style = self.style_ligne(ligne)
+            morceaux = plier(ligne, max(1, larg - 4))
+            ecran.append(self.peindre(x0 + 2, morceaux[0], style, o.vocabulaire, True))
+            for suite in morceaux[1:]:
+                ecran.append(self.peindre(x0 + 4, suite, style, o.vocabulaire))
+        o.aide_haut = borne(o.aide_haut, len(ecran), interieur)
+        for i in range(interieur):
+            self.ecrire(y0 + 1 + i, x0, self.v_trait, cadre)
+            self.ecrire(y0 + 1 + i, x0 + larg - 1, self.v_trait, cadre)
+            for x, texte, attr in (ecran[o.aide_haut + i] if o.aide_haut + i < len(ecran) else []):
+                self.ecrire(y0 + 1 + i, x, texte[: max(0, x0 + larg - 2 - x)], attr)
+        touches = ("↑↓ PgUp/PgDn g G défiler · Échap ou q fermer" if self.utf8
+                   else "haut/bas PgUp/PgDn g G defiler . Echap ou q fermer")
+        pied = (bg + self.h_trait * 2 + " " + touches + " " + self.h_trait * larg)[: max(1, larg - 1)] + bd
+        self.ecrire(y0 + haut - 1, x0, pied, cadre)
+        if len(ecran) > interieur:
+            self.ecrire(y0 + haut - 1, max(x0, x0 + larg - 14),
+                        " %d/%d " % (min(o.aide_haut + interieur, len(ecran)), len(ecran)), cadre)
 
     # --- boucle -----------------------------------------------------------------------------------------
     def deux_volets(self, o):
@@ -1177,6 +1246,29 @@ class Interface:
                     self.filtre += touche
                 for o in self.onglets:
                     o.haut = 0
+                continue
+            # L'aide ouverte prend TOUT le clavier : elle recouvre l'écran, il serait trompeur que
+            # des touches agissent sur ce qu'on ne voit plus. Elle ne se ferme que sur Échap ou q, et
+            # rend l'onglet exactement comme il était — rien dessous n'a bougé.
+            if self.aide_ouverte:
+                o = self.onglets[self.actif]
+                if touche in ("q", "Q", "\x1b", "?"):
+                    self.aide_ouverte = False
+                elif touche in (curses.KEY_DOWN, "j"):
+                    o.aide_haut += 1
+                elif touche in (curses.KEY_UP, "k"):
+                    o.aide_haut = max(0, o.aide_haut - 1)
+                elif touche in (curses.KEY_NPAGE, " ", "\x06"):
+                    o.aide_haut += max(1, self.ecran.getmaxyx()[0] - 6)
+                elif touche in (curses.KEY_PPAGE, "\x02"):
+                    o.aide_haut = max(0, o.aide_haut - max(1, self.ecran.getmaxyx()[0] - 6))
+                elif touche == "g":
+                    o.aide_haut = 0
+                elif touche == "G":
+                    o.aide_haut = 10 ** 9      # borné au dessin, qui seul connaît le nombre de lignes
+                continue
+            if touche == "?" and self.onglets[self.actif].aide:
+                self.aide_ouverte = True
                 continue
             if touche in ("q", "Q"):
                 return

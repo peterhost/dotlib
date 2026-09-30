@@ -27,12 +27,16 @@ sys.path.insert(0, os.environ["ONGLETS_DIR"])
 import onglets
 def groupes():
     return [("alpha", ["== titre alpha", "ligne a1", "✓ bon"]), ("beta", ["ligne b1"])]
+def aide():
+    return ["== Aide de cet onglet", "chemin ~/.dotlib et commande `brc doctor`", "---",
+            "LIGNE-DE-FOND-DE-L-AIDE"] + ["remplissage %d" % i for i in range(60)]
 o = [onglets.Onglet("Texte", lambda: ["premiere ligne", "MOT-CHERCHE ici",
                                       "pose dans ~/.dotlib, voir $DOTLIB_THEME", "derniere ligne"]),
      onglets.Onglet("Groupes", groupes, genre="groupes", action=lambda n: "applique %s" % n),
      onglets.Onglet("Raccourcis", lambda: {"entrees": [["vim", "edition", "x", "effacer le mot (,h) puis :Keys", "global"],
                                                         ["bash", "edition", " ", "espace", "mode insertion"]],
-                                            "themes": ["edition"]}, genre="raccourcis")]
+                                            "themes": ["edition"]}, genre="raccourcis"),
+     onglets.Onglet("Aidee", lambda: ["contenu de l'onglet"], aide=aide)]
 sys.exit(onglets.lancer(o, "essai"))
 P
 lance() {   # lance « touches » [env…] → sortie écran (sans \r) ; code dans $TMP/code
@@ -149,6 +153,49 @@ printf '%s' "$out" | LC_ALL=C grep -q "48;5;110" \
 out=$(lance_a 'q' TERM=vt100 LANG=en_US.UTF-8)
 printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "aperçu vt100 : des couleurs émises" \
   || ok "aperçu : sans couleurs, rien n'est peint plutôt qu'une palette fausse"
+
+# 5 quinquies. L'AIDE d'un onglet : une grande fenêtre par-dessus tout, qui ne change RIEN dessous.
+# Le point qui compte n'est pas qu'elle s'ouvre, c'est qu'on retrouve l'onglet intact en la fermant :
+# une aide qui déplacerait la sélection ou effacerait le filtre ferait perdre ce qu'on était en train
+# de faire, et on hésiterait à la demander.
+out=$(lance '4?qq' TERM=xterm-256color LANG=en_US.UTF-8)
+case $out in *"Aide — Aidee"*) ok "aide : « ? » ouvre une fenêtre titrée du nom de l'onglet" ;;
+             *) ko "aide non ouverte" "$(printf '%s' "$out" | tail -5)" ;; esac
+case $out in *"Échap ou q fermer"*) ok "aide : ses touches sont annoncées dans son cadre" ;;
+             *) ko "aide : touches non annoncées" ;; esac
+case $out in *"? aide"*) ok "aide : la touche est annoncée dans le pied de page de l'onglet" ;;
+             *) ko "aide : touche non annoncée" ;; esac
+# … et sur un onglet SANS aide, ni touche ni annonce
+out=$(lance '1?q' TERM=xterm-256color LANG=en_US.UTF-8)
+case $out in *"? aide"*) ko "aide : annoncée sur un onglet qui n'en a pas" ;;
+             *) ok "aide : rien d'annoncé sur un onglet qui n'en a pas" ;; esac
+# Le filtre passe AVANT : « ? » y est un caractère, pas une commande.
+out=$(lance '2/?\033q' TERM=xterm-256color LANG=en_US.UTF-8)
+case $out in *"Aide — Aidee"*) ko "aide : « ? » a ouvert l'aide alors qu'on tapait un filtre" ;;
+             *) ok "aide : pendant un filtre, « ? » est un caractère du filtre" ;; esac
+# G va au bout. On l'éprouve sur le COMPTEUR et non sur le texte : dans un flux de redessins, la
+# dernière ligne visible d'une image précédente traîne encore plus loin que celle de l'image finale,
+# et chercher un mot y donne une réponse qui ne veut rien dire. Le compteur « n/n », lui, n'apparaît
+# qu'une fois arrivé au bout.
+out=$(lance '4?Gqq' TERM=xterm-256color LANG=en_US.UTF-8)
+# Le DÉFILEMENT s'éprouve hors du terminal : dans un pseudo-terminal, curses n'émet que ce qui change
+# d'une image à l'autre, donc « remplissage 40 » peut n'y apparaître qu'en morceaux (« remplissage 4 »
+# puis un déplacement de curseur puis « 0 »). Chercher un texte dans ce flux ne prouve rien.
+out=$(cd "$TMP" && $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+from onglets import borne
+cas = [(0, 62, 19, 0), (10**9, 62, 19, 43), (-5, 62, 19, 0), (10**9, 5, 19, 0), (7, 62, 19, 7)]
+print("ok" if all(borne(h, t, n) == a for h, t, n, a in cas) else "KO")' 2>&1)
+[ "$out" = ok ] && ok "aide : G va à la dernière page, g à la première, sans jamais sortir du contenu" \
+  || ko "aide : bornes du défilement" "$out"
+# Sans UTF-8 : cadre ASCII, aucun caractère semi-graphique.
+out=$(lance '4?qq' TERM=xterm-256color LC_ALL=C LANG=C)
+printf '%s' "$out" | LC_ALL=C grep -q '\xe2\x94' && ko "aide : cadre semi-graphique sous une locale C" \
+  || ok "aide : cadre ASCII sous une locale non UTF-8"
+# Sans couleurs : rien d'émis.
+out=$(lance '4?qq' TERM=vt100 LANG=en_US.UTF-8)
+printf '%s' "$out" | LC_ALL=C grep -q "$E\[3[0-7]m\|$E\[38;" && ko "aide vt100 : des couleurs émises" \
+  || ok "aide : sans couleurs, aucune séquence de couleur"
 
 # 5 quater. SORTIR AVEC UNE VALEUR : certaines choses ne peuvent se faire qu'une fois le terminal
 # rendu — attacher une session tmux en est le cas d'école, puisque curses tient le terminal. Une action

@@ -134,6 +134,7 @@ construisez sans elle.
     4 : les lignes de commande se peignent entières ; affectations et noms de fichiers reconnus
     5 : `Onglet(apercu=)`, repère `---`, `sources_palette()`
     6 : `Quitter(valeur)` — sortir de l'interface avec une valeur, code 5, `onglets.QUITTE`
+    7 : `Onglet(aide=)` — une aide par onglet, touche « ? », grande fenêtre
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
@@ -195,6 +196,10 @@ testent — l'un d'eux n'a aucune copie de repli.
   Ne jamais utiliser `locale.getpreferredencoding()` : depuis Python 3.7 il rend `utf-8` même sous
   `LC_ALL=C` (PEP 538/540), donc tout repli ASCII fondé sur lui est du code mort.
 - `onglets.ordonner(presents, reference)` → les présents dans l'ordre de référence, les autres à la suite.
+- `onglets.borne(haut, total, hauteur)` → première ligne à afficher, ramenée dans le possible. Publique
+  parce qu'elle est la seule façon d'éprouver un défilement SANS terminal : dans un pseudo-terminal,
+  curses n'émet que les caractères qui changent d'une image à l'autre, donc chercher un texte dans le
+  flux ne prouve rien sur ce qui est à l'écran.
 - `onglets.sources_palette(nom)` → `{"git": …, "site": …}`, clés absentes s'il n'y a rien, `{}` si la
   palette est inconnue ou le fichier illisible. Lit `share/palettes-sources.tsv`, une DONNÉE : une
   palette ajoutée là n'oblige à toucher aucun programme.
@@ -220,6 +225,25 @@ Quatre repères, en tête de ligne, et pas un de plus :
 
 Le filet est un repère et non un dessin à faire soi-même : écrire « ──── » à la main donne des
 « [?] » sous une locale non UTF-8, et c'est au socle de choisir le caractère selon le terminal.
+
+### L'aide d'un onglet
+
+`Onglet(..., aide=fonction)` — `fonction()` ne prend aucun argument et rend une liste de lignes.
+La touche **`?`** ouvre une grande fenêtre par-dessus tout l'onglet ; `Échap` ou `q` la ferme.
+Sans `aide=`, la touche n'existe pas et rien n'est annoncé : un outil qui n'en veut pas ne change pas.
+
+- le contenu se **plie, se colore et porte les mêmes repères** que les onglets « texte » (`==`, `✓`,
+  `✗`, `!`, `---`), et reçoit le `vocabulaire` de l'onglet : une aide est du texte de cet outil, pas
+  un objet à part avec ses propres règles ;
+- elle est **chargée à la première ouverture et gardée**, comme un producteur ; une aide qui lève
+  s'affiche comme « aide illisible : … » et ne ferme pas l'onglet ;
+- elle défile : `↑↓` `j` `k`, `PgUp`/`PgDn`, `Espace`, `g`, `G`, avec un compteur `n/n` ;
+- **elle ne touche à rien dessous** : sélection, défilement et filtre de l'onglet sont retrouvés
+  intacts à la fermeture. C'est ce qui fait qu'on ose la demander au milieu d'une recherche ;
+- **`?` pendant un filtre `/` est un caractère du filtre**, pas une ouverture : la saisie passe avant ;
+- la fenêtre prend neuf dixièmes de l'écran, et **tout l'écran** en dessous de 60 colonnes ou
+  16 lignes : des marges sur un terminal étroit ne laisseraient plus rien pour le texte ;
+- sans couleurs, cadre sans couleur ; sans UTF-8, cadre ASCII.
 
 ### Aperçu d'un groupe dans une autre palette
 
