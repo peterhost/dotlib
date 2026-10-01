@@ -136,6 +136,9 @@ construisez sans elle.
     6 : `Quitter(valeur)` — sortir de l'interface avec une valeur, code 5, `onglets.QUITTE`
     7 : `Onglet(aide=)` — une aide par onglet, touche « ? », grande fenêtre
     8 : aperçu de lignes PRÉ-COLORÉES (`{"brut": True}`), `couleur256()`, `decouper_sgr()`
+    9 : `Onglet(touches=, action_libelle=)` plusieurs actions par onglet · `Onglet(rafraichir=,
+        rafraichir_complet=, produire_complet=)` onglet qui se recharge seul · lignes en SEGMENTS
+        `[(texte, rôle), …]` et `ROLES_LIGNE` · `avant_plan()` · `texte_ligne()`, `plier_segments()`
 
 Un appelant teste `onglets.API in (les versions qu'il sait utiliser)`, ou lit `API_COMPATIBLES`.
 **Le nom de ces deux attributs ne changera pas** : un garde-fou qui lit un attribut inexistant ne
@@ -376,6 +379,89 @@ points d'interrogation. Fenêtre plus petite que 40×10 → un message, pas une 
 
 ←→ Tab Maj-Tab `1`…`9` (onglets) · ↑↓ `j` `k` · PgUp PgDn Espace · `g` `G` · `/` filtre (Échap
 l'efface) · Entrée (action) · `r` recharger · `q` quitter.
+
+**Elles appartiennent au socle, et un onglet ne peut pas les lui reprendre** : `onglets.TOUCHES_RESERVEES`
+les énumère, et `Onglet(touches=…)` lève `ValueError` à la CONSTRUCTION si l'une d'elles est demandée —
+avant curses, de façon reproductible, avec la liste des touches libres dans le message. Une touche qui
+recharge dans trois onglets et répare dans le quatrième est un piège, d'autant que le pied l'annonce
+partout de la même façon ; et une touche silencieusement ignorée ne se voit qu'une fois déployée.
+
+### Plusieurs actions dans un onglet « groupes » (révision 9)
+
+`Onglet(..., touches={"a": ("attacher", fn), "d": ("dépanner", fn)}, action_libelle="reprendre")`
+
+`fn(nom)` a le **même contrat** qu'`action` : elle reçoit le nom du groupe choisi, rend un message (ou
+rien) et peut lever `Quitter`. `action_libelle` dit ce que fait Entrée : sans lui le pied affiche
+« appliquer », qui ne veut plus rien dire quand cinq actions l'entourent.
+
+Le pied annonce les touches de l'onglet **avant** l'aide générale — ce sont les seules que
+l'utilisateur ne peut pas deviner — et tronque avec `›` s'il déborde. La fenêtre `?` les liste en
+entier, en tête de l'aide de l'onglet, que celle-ci existe ou non.
+
+Après une action, l'onglet est rechargé **en place** : sélection, défilement, volet actif et section de
+gauche conservés. Une action qui fait sauter la sélection oblige à retrouver sa place après chaque geste.
+
+### Lignes en segments : des couleurs DANS une ligne (révision 9)
+
+Dans les genres `texte` et `groupes`, une ligne peut être une chaîne (comme avant) **ou** une liste de
+segments `[(texte, rôle), …]` :
+
+    [("hote-3  ", "discret"), ("vivant", "bon"), ("  battement 412 s ⚠", "mauvais")]
+
+Rôles publiés (`onglets.ROLES_LIGNE`) : `bon` · `mauvais` · `avertir` · `discret` · `vedette` ·
+`commande`. Un rôle `None` vaut « texte nu, sans grammaire » : un appelant qui décrit lui-même sa
+ligne la décrit en entier. Un rôle inconnu lève `ValueError` au premier tracé — bruyant, plutôt
+qu'une couleur fausse.
+
+**Ce sont des SENS, pas des couleurs**, et c'est le point : « vert » ne suivrait pas le thème et ne se
+dégraderait pas là où il n'y a pas de couleurs — or c'est précisément là que tournent les machines
+contraintes (un NAS rapporte `COLORS=0`). Sans couleurs, la ligne s'affiche nue, au caractère près.
+
+Le pliage, le filtre (sur le texte visible) et les décomptes continuent de fonctionner :
+`onglets.texte_ligne(ligne)` rend le texte nu d'une ligne de l'un ou l'autre genre, et
+`onglets.plier_segments(segments, largeur)` plie **exactement** comme `plier()` en gardant le rôle de
+chaque caractère (éprouvé par comparaison des deux sur 24 cas).
+
+Pourquoi pas du SGR brut, comme l'aperçu de la révision 8 : dans un volet qui DÉFILE, des lignes
+pré-colorées casseraient trois choses à la fois — le filtre chercherait dans les octets
+d'échappement, le pliage couperait au milieu d'une séquence, les décomptes compteraient des
+caractères invisibles. L'aperçu, lui, ne défile pas, ne se filtre pas et ne se plie pas.
+
+### Onglet vivant : se recharger seul (révision 9)
+
+`Onglet(..., rafraichir=2, rafraichir_complet=10, produire_complet=fn)`
+
+L'onglet est rechargé toutes les `rafraichir` secondes, **et seulement quand il est à l'écran** : un
+onglet qu'on ne regarde pas ne coûte rien, et le socle n'arme un délai d'attente du clavier que pour
+l'onglet affiché (il dort autrement). `produire_complet` est appelé à la place de `produire` toutes les
+`rafraichir_complet` secondes : le socle ne sait pas ce que « complet » veut dire chez vous, donc c'est
+vous qui le dites — plutôt que de changer la signature de `produire()`, dont dépendent tous les onglets
+déjà écrits. Sans `produire_complet`, pas de rechargement complet.
+
+Sélection, défilement et volet actif sont conservés. `R` recharge sur demande, dans tous les onglets.
+Si un producteur échoue pendant un rafraîchissement, **le rafraîchissement s'arrête** et le dit : sinon
+il noierait le pied de messages et relancerait sans fin ce qui vient d'échouer. `R` reste là pour
+réessayer quand la cause est levée.
+
+Garantie qui va avec, et qui est testée : une entrée fermée fait toujours SORTIR, intervalle armé ou
+non. Les deux causes de la même erreur de curses — le délai qui expire et l'entrée qui ne donnera plus
+rien — sont distinguées sans se fier à une mesure de temps (un terminal au repos n'a rien à lire ; une
+entrée fermée est « prête à lire » et ne rend rien). Sans cela, un onglet vivant sortirait tout seul au
+bout de vingt délais, ou tournerait sans fin à 100 % de processeur.
+
+### Rendre le terminal le temps d'une commande (révision 9)
+
+`onglets.avant_plan(argv, cwd=None, env=None, attendre=True)` → code de sortie de la commande.
+
+Appelable **depuis une action**. Rend le terminal (`endwin`), lance la commande en avant-plan — elle
+peut écrire, poser une question « o/N », ouvrir un éditeur —, affiche « [Entrée] pour revenir », puis
+reprend l'interface **là où elle était**. La souris est désarmée pendant ce temps, sans quoi la commande
+reçoit les rapports de molette comme des caractères. La restauration est dans un `finally` : même si la
+commande explose, le terminal revient à l'interface. Hors interface, la commande est simplement lancée.
+
+À distinguer de `Quitter`, qui FERME l'interface et rend la main à l'appelant : juste pour « attacher
+une session tmux » (on ne revient pas), mais pas pour une commande dont on veut voir le résultat avant
+de continuer — il fallait relancer `lancer()`, donc reconstruire les onglets et perdre la sélection.
 
 ### Hors contrat, expérimental
 

@@ -506,5 +506,179 @@ for t in pliage palette coloration; do
   esac
 done
 
+# ======================================================================================
+# 16. RÉVISION 9 : plusieurs actions par onglet, lignes en segments, onglet vivant, avant_plan.
+# ======================================================================================
+
+# 16 a. Ce qui est PUR s'éprouve sans terminal : refus des touches réservées, rôles, pliage.
+out=$(cd "$TMP" && $PY -c '
+import sys; sys.dont_write_bytecode=True; sys.path.insert(0,".")
+import onglets
+from onglets import Onglet, plier, plier_segments, texte_ligne
+raisons = []
+# une touche du socle ne peut pas être reprise par un onglet : refus À LA CONSTRUCTION, et le message
+# doit nommer des touches libres, sinon on refuse sans dire quoi faire
+for t in ("r", "q", "G", "j", "/", "?", "1", " "):
+    try:
+        Onglet("T", list, genre="groupes", touches={t: ("x", print)})
+        raisons.append("touche %r acceptée alors quelle est réservée" % t)
+    except ValueError as e:
+        if "libres" not in str(e): raisons.append("refus de %r sans touches libres : %s" % (t, e))
+for t in ("a", "c", "d", "i", "x"):
+    try: Onglet("T", list, genre="groupes", touches={t: ("x", print)})
+    except ValueError as e: raisons.append("touche libre %r refusée : %s" % (t, e))
+# une touche mal formée est un défaut de lappelant, pas une touche morte
+for mauvais in ({"ab": ("x", print)}, {"a": ("x",)}, {"a": ("x", "pas une fonction")}, {1: ("x", print)}):
+    try:
+        Onglet("T", list, genre="groupes", touches=mauvais); raisons.append("accepté : %r" % (mauvais,))
+    except ValueError: pass
+# plier_segments plie EXACTEMENT comme plier (même règle, mêmes coupures) et garde les rôles
+for t in ["abc def ghi", "un deux trois quatre cinq six sept", "", "  des  blancs  ", "x"*40, "a b"]:
+    for larg in (8, 12, 20, 76):
+        a, b = plier(t, larg), [texte_ligne(l) for l in plier_segments([(t, None)], larg)]
+        if a != b: raisons.append("pliage divergent %r/%d : %r != %r" % (t, larg, a, b))
+seg = [("hote-3  ", "discret"), ("vivant", "bon"), ("  battement 412 s", "mauvais")]
+plie = plier_segments(seg, 16)
+if [[(t, r) for t, r in l] for l in plie] != [[("hote-3  ", "discret"), ("vivant", "bon")],
+                                              [("battement 412 s", "mauvais")]]:
+    raisons.append("rôles perdus au pli : %r" % (plie,))
+if texte_ligne(seg) != "hote-3  vivant  battement 412 s": raisons.append("texte_ligne : %r" % texte_ligne(seg))
+if texte_ligne("nue") != "nue": raisons.append("texte_ligne dune chaîne")
+# les six rôles publiés existent, et aucun nest un nom interne
+if sorted(onglets.ROLES_LIGNE) != ["avertir", "bon", "commande", "discret", "mauvais", "vedette"]:
+    raisons.append("rôles publiés : %r" % sorted(onglets.ROLES_LIGNE))
+print("ok" if not raisons else "KO " + " | ".join(raisons))' 2>&1)
+[ "$out" = ok ] && ok "révision 9 : touches réservées refusées à la construction, segments pliés comme le texte" \
+  || ko "révision 9 : contrat pur" "$out"
+
+# 16 b. L'entrée fermée, AVEC un intervalle de rafraîchissement armé : c'est le piège de l'ajout.
+# Sans distinction entre « le délai a expiré » et « il n'y a plus personne », l'onglet vivant sortirait
+# tout seul au bout de 20 délais — ou, pire, tournerait sans fin à 100 % de processeur.
+cat > "$TMP/vivant.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+n = [0]
+def produire():
+    n[0] += 1
+    return [("groupe", [[("tour %d" % n[0], "bon")]])]
+o = [onglets.Onglet("V", produire, genre="groupes", rafraichir=1,
+                    touches={"a": ("agir", lambda nom: "fait")})]
+sys.exit(onglets.lancer(o, "vivant"))
+P
+out=$(cd "$TMP" && ONGLETS_DIR="$TMP" timeout 20 $PY -c '
+import os, pty, sys, time
+m, e = pty.openpty()
+pid = os.fork()
+if pid == 0:
+    os.close(m); os.setsid()
+    os.dup2(e, 0); os.dup2(e, 1); os.dup2(e, 2)
+    os.environ["TERM"] = "xterm"
+    os.execvp(sys.executable, [sys.executable, "vivant.py"])
+os.close(e); os.close(m)          # plus de clavier, plus décran : lenfant doit SORTIR
+debut = time.time()
+_, statut = os.waitpid(pid, 0)
+print("SORTI en %.1f s" % (time.time() - debut))' 2>&1)
+case $out in
+  *"SORTI en"*) duree=${out#*SORTI en }; duree=${duree% s}
+                case $duree in 0.*|1.*|2.*|3.*|4.*|5.*) ok "onglet vivant : entrée fermée → sortie en $duree s (pas de boucle)" ;;
+                               *) ko "onglet vivant : sortie trop lente ($duree s)" "$out" ;; esac ;;
+  *) ko "onglet vivant : l'entrée fermée ne fait pas sortir (boucle sans fin ?)" "$out" ;;
+esac
+
+# 16 c. Le reste ne se mesure que dans un VRAI terminal : ce qui est à l'écran, le rafraîchissement
+# qui garde la sélection, le pied qui annonce les touches, et le terminal rendu puis repris.
+if command -v tmux >/dev/null 2>&1; then
+  cat > "$TMP/forge.py" <<'P'
+import sys, os
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.environ["ONGLETS_DIR"])
+import onglets
+compte = [0]
+def produire():
+    compte[0] += 1
+    return [("alpha", [[("alpha  ", "discret"), ("vivant", "bon"),
+                        ("  tours=%d" % compte[0], "avertir")],
+                       [("une ligne tres longue qui doit se replier parce quelle depasse", "mauvais")]]),
+            ("beta", [[("beta  ", "discret"), ("arrete", "discret")]])]
+def dehors(nom):
+    onglets.avant_plan(["sh", "-c", "echo COUCOU-AVANT-PLAN-%s" % nom])
+    return "revenu de %s" % nom
+o = [onglets.Onglet("Forge", produire, genre="groupes", rafraichir=1,
+                    action=lambda n: "repris %s" % n, action_libelle="reprendre",
+                    touches={"a": ("attacher", lambda n: "attache %s" % n),
+                             "d": ("depanner", dehors)})]
+sys.exit(onglets.lancer(o, "forge"))
+P
+  S=dotlib-forge-$$
+  tmux kill-session -t "$S" 2>/dev/null
+  if tmux new-session -d -s "$S" -x 90 -y 20 \
+       "cd '$TMP' && ONGLETS_DIR='$TMP' TERM=xterm-256color $PY forge.py; echo FINI > '$TMP/forge.fin'" 2>/dev/null; then
+    sleep 2
+    vu1=$(tmux capture-pane -p -t "$S" 2>/dev/null)
+    # le pied annonce Entrée PAR SON LIBELLÉ, puis les touches de l'onglet
+    case $vu1 in *"Entrée reprendre"*) ok "pied : Entrée porte le libellé de l'onglet" ;;
+                 *) ko "pied : libellé de Entrée absent" "$vu1" ;; esac
+    case $vu1 in *"a attacher"*) ok "pied : les touches de l'onglet sont annoncées" ;;
+                 *) ko "pied : touches de l'onglet absentes" "$vu1" ;; esac
+    case $vu1 in *vivant*) ok "segments : la ligne composée s'affiche" ;;
+                 *) ko "segments : ligne absente" "$vu1" ;; esac
+    case $vu1 in *"se replier parce"*) ok "segments : une ligne longue se replie (rien n'est perdu)" ;;
+                 *) ko "segments : ligne longue tronquée" "$vu1" ;; esac
+    # la ligne composée est bien COLORÉE, et en trois couleurs : on relit lécran avec les séquences
+    brut=$(tmux capture-pane -p -e -t "$S" 2>/dev/null | grep vivant | head -1)
+    # les séquences de couleur DISTINCTES de la ligne : trois morceaux de sens, trois couleurs.
+    n=$(printf '%s' "$brut" | grep -o "$E\\[[0-9;]*m" | sort -u | grep -c '3[0-9]' || true)
+    [ "${n:-0}" -ge 2 ] && ok "segments : plusieurs couleurs DANS la même ligne ($n distinctes)" \
+      || ko "segments : une seule couleur sur la ligne" "$(printf '%s' "$brut" | cat -v)"
+    # rafraîchissement : le compteur du producteur avance tout seul, sans toucher au clavier
+    t1=$(printf '%s' "$vu1" | sed -n 's/.*tours=\([0-9]*\).*/\1/p' | head -1)
+    sleep 3
+    t2=$(tmux capture-pane -p -t "$S" 2>/dev/null | sed -n 's/.*tours=\([0-9]*\).*/\1/p' | head -1)
+    [ -n "$t1" ] && [ -n "$t2" ] && [ "$t2" -gt "$t1" ] \
+      && ok "onglet vivant : le contenu se recharge seul ($t1 → $t2)" \
+      || ko "onglet vivant : pas de rafraîchissement ($t1 → $t2)"
+    # … en GARDANT la sélection : on descend sur « beta », on attend deux rechargements, on y est encore
+    tmux send-keys -t "$S" j 2>/dev/null; sleep 3
+    apres=$(tmux capture-pane -p -t "$S" 2>/dev/null)
+    case $apres in *arrete*) ok "onglet vivant : la sélection survit au rafraîchissement" ;;
+                   *) ko "onglet vivant : la sélection est revenue en haut" "$apres" ;; esac
+    # une touche propre à l'onglet agit, et son message s'affiche
+    tmux send-keys -t "$S" a 2>/dev/null; sleep 1
+    case $(tmux capture-pane -p -t "$S" 2>/dev/null) in
+      *"attache beta"*) ok "touche de l'onglet : l'action est lancée sur le groupe choisi" ;;
+      *) ko "touche de l'onglet : rien ne s'est passé" "$(tmux capture-pane -p -t "$S" 2>/dev/null)" ;;
+    esac
+    # « ? » n'existe pas ici (pas d'aide donnée), mais avant_plan doit rendre le terminal
+    tmux send-keys -t "$S" d 2>/dev/null; sleep 2
+    dehors=$(tmux capture-pane -p -t "$S" 2>/dev/null)
+    case $dehors in *COUCOU-AVANT-PLAN-beta*) ok "avant_plan : la commande s'affiche dans le vrai terminal" ;;
+                    *) ko "avant_plan : la commande n'a pas rendu le terminal" "$dehors" ;; esac
+    case $dehors in *"pour revenir"*) ok "avant_plan : on attend avant de recouvrir la sortie" ;;
+                    *) ko "avant_plan : pas d'attente avant de redessiner" "$dehors" ;; esac
+    tmux send-keys -t "$S" Enter 2>/dev/null; sleep 2
+    repris=$(tmux capture-pane -p -t "$S" 2>/dev/null)
+    # L'interface est revenue ET à sa place : la barre d'onglets est repeinte, la sélection est
+    # restée sur « beta », et le message de l'action est là — c'est lui qui occupe le pied au retour,
+    # à la place de la ligne d'aide (premier essai de ce test : j'attendais l'aide, à tort).
+    case $repris in *"1 Forge"*) ok "avant_plan : l'interface est repeinte au retour" ;;
+                    *) ko "avant_plan : l'interface n'est pas revenue" "$repris" ;; esac
+    case $repris in *"revenu de beta"*) ok "avant_plan : l'action reprend la main et son message s'affiche" ;;
+                    *) ko "avant_plan : le message de l'action est perdu" "$repris" ;; esac
+    case $repris in *arrete*) ok "avant_plan : la sélection et le volet sont retrouvés tels quels" ;;
+                    *) ko "avant_plan : la sélection est perdue" "$repris" ;; esac
+    case $repris in *COUCOU*) ko "avant_plan : la sortie de la commande reste collée à l'écran" "$repris" ;;
+                    *) ok "avant_plan : l'écran est repeint proprement au retour" ;; esac
+    tmux send-keys -t "$S" q 2>/dev/null; sleep 1
+    [ -f "$TMP/forge.fin" ] && ok "révision 9 : q sort toujours" || ko "révision 9 : q ne sort plus"
+    tmux kill-session -t "$S" 2>/dev/null
+  else
+    ok "révision 9 : rendu non mesuré (tmux n'a pas démarré ici)"
+  fi
+else
+  ok "révision 9 : rendu non mesuré (tmux absent — c'est le seul instrument pour un rendu)"
+fi
+
 printf '\n%s%d réussis%s, %d échecs\n' "$G" "$PASS" "$N" "$FAIL"
 [ $FAIL -eq 0 ]

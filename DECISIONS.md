@@ -58,3 +58,49 @@ pouvoir reprendre dotlib en lisant API.md, CLAUDE.md, ce journal et les tests.
   l'ajout dont il a besoin est là. Côté shell, l'absence se paie plus cher : `dotlib_pill -p BAD x T`
   sur une version ancienne prend `-p` pour un nom de couleur et rend une pastille fausse **sans lever
   d'erreur**. Une dégradation silencieuse vaut moins qu'une erreur franche.
+- **Un onglet reçoit des SENS, jamais des couleurs : les lignes en segments plutôt que du SGR brut**
+  (01/10/2026). La session bash demandait, pour le poste de pilotage de sa forge, d'accepter des lignes
+  pré-colorées en SGR dans le volet qui défile — vert pour vivant, gris pour arrêté, rouge pour un état
+  à remède, jaune pour une alerte — comme l'aperçu de la révision 8 sait déjà le faire. Refusé, et
+  remplacé par des segments `[(texte, rôle), …]` avec six rôles publiés. Deux raisons, l'une technique
+  et l'autre de fond. **Technique** : dans un volet qui défile, du SGR casse trois choses à la fois — le
+  filtre chercherait la chaîne de l'utilisateur dans les octets d'échappement, le pliage couperait au
+  milieu d'une séquence, les décomptes compteraient des caractères invisibles. Le `brut` de la révision
+  8 ne marche que parce qu'un aperçu ne défile pas, ne se filtre pas et ne se plie pas : c'est une
+  vitrine de trois lignes, pas une liste. **De fond** : ces quatre couleurs ne sont pas des couleurs,
+  ce sont des états. Reçues comme des couleurs, elles ne suivraient pas le thème et ne se dégraderaient
+  pas là où il n'y a pas de couleurs — or c'est exactement là que tournent les machines contraintes.
+  L'appelant dit ce que la chose EST, le socle choisit comment le montrer. Les noms publiés sont ceux
+  du sens (`bon`, `mauvais`, `avertir`, `discret`, `vedette`, `commande`) et non les noms internes des
+  rôles de palette, qui nomment leur origine (« onglet » pour le vert) et non leur sens. La session
+  bash a accepté le même jour : « ils valent mieux que du SGR ».
+- **Les touches du socle ne se prêtent pas, et le refus est bruyant** (01/10/2026). Avec plusieurs
+  actions par onglet (`touches={"a": ("attacher", fn), …}`), un onglet pouvait demander `r` — déjà
+  « recharger », annoncé dans le pied de TOUS les onglets. Trois issues possibles : laisser l'onglet
+  l'emporter (une touche qui recharge dans trois onglets et répare dans le quatrième, le pied disant la
+  même chose partout), l'ignorer en silence (une touche morte qui ne se voit qu'une fois déployée — on
+  connaît, c'est `ONGLETS_API` qui lisait un attribut inexistant), ou refuser. **Refus à la
+  CONSTRUCTION de l'onglet** : avant curses, reproductible, et le message nomme les touches libres pour
+  que l'appelant n'ait pas à les deviner. Une erreur franche au premier lancement vaut mieux qu'un
+  piège qui survit au déploiement.
+- **`avant_plan()` : rendre le terminal sans fermer l'interface** (01/10/2026). `Quitter` existait déjà
+  pour ce qui ne peut se faire qu'hors de curses, et c'est juste pour « attacher une session tmux » —
+  on ne revient pas. Mais pour une commande dont on veut voir le résultat avant de continuer, il fallait
+  sortir, lancer, puis relancer `lancer()` : donc reconstruire les onglets et perdre la sélection. Le
+  socle rend donc le terminal le temps d'une commande, puis reprend l'onglet là où il était. Deux
+  détails qui n'en sont pas : la souris est DÉSARMÉE pendant ce temps (sinon la commande reçoit les
+  rapports de molette comme des caractères dans son invite), et « [Entrée] pour revenir » est
+  indispensable — sans attente, l'interface se redessine par-dessus la sortie de la commande, et le
+  travail est fait mais invisible, ce qui revient à ne pas l'avoir fait.
+- **Un onglet vivant ne coûte que quand on le regarde, et une entrée fermée fait toujours sortir**
+  (01/10/2026). `rafraichir=2` recharge l'onglet AFFICHÉ toutes les deux secondes : le socle n'arme un
+  délai d'attente du clavier que pour celui-là, et dort autrement — rien ne justifie de lancer des
+  commandes pour une liste que personne n'a sous les yeux. Le piège était ailleurs, et invisible du
+  dehors : `get_wch` lève la MÊME erreur de curses quand le délai expire et quand l'entrée ne donnera
+  plus rien, or la boucle comptait ces erreurs pour détecter une entrée fermée et sortait au bout de
+  vingt. Un onglet vivant aurait donc quitté tout seul au bout de quarante secondes. Distinguer les deux
+  par le temps écoulé ne suffit pas — se tromper d'un côté fait sortir une interface vivante, de l'autre
+  tourner une boucle à 100 % de processeur, qui est le défaut le plus grave que la session vim avait
+  trouvé. Le signe employé ne dépend pas d'une mesure : un terminal au repos n'a RIEN à lire, une entrée
+  fermée est « prête à lire » et ne rend rien. On ne lit jamais l'octet — savoir qu'il y en a un suffit,
+  le prendre le volerait au clavier.

@@ -13,7 +13,9 @@ Trois genres d'onglets :
     texte       produire() → liste de lignes ; défilement, filtre de lignes
     raccourcis  produire() → {"entrees": [[source, thème, touches, description, portée]…], "themes": [ordre]}
     groupes     produire() → [(nom, [lignes]), …] : noms à gauche, lignes du choisi à droite ;
-                action(nom) facultative, appelée par Entrée, renvoie un message (l'onglet est rechargé)
+                action(nom) facultative, appelée par Entrée, renvoie un message (l'onglet est rechargé) ;
+                touches={"a": ("attacher", fn), …} pour d'autres actions ; une ligne peut être une
+                chaîne ou une liste de segments [(texte, rôle), …] ; rafraichir=2 pour un onglet vivant
 
 Dégradation (voulue, testée) : aucune couleur (ncurses sans couleurs, TERM=vt100…) → monochrome lisible ;
 locale non UTF-8 → cadres en ASCII ; fenêtre trop petite → message ; entrée fermée → sortie ; le terminal
@@ -25,8 +27,10 @@ import curses
 import locale
 import os
 import re
+import select
 import subprocess
 import sys
+import time
 import unicodedata
 
 API = 1
@@ -45,7 +49,11 @@ API_COMPATIBLES = (1,)
 #   6 : Quitter(valeur) — sortir de l'interface avec une valeur, code 5, onglets.QUITTE
 #   7 : Onglet(aide=) — une aide par onglet, touche « ? », grande fenêtre
 #   8 : aperçu de lignes PRÉ-COLORÉES — apercu() rend {"brut": True}, couleur256(), decouper_sgr()
-REVISION = 8
+#   9 : Onglet(touches=, action_libelle=) plusieurs actions par onglet · Onglet(rafraichir=,
+#       rafraichir_complet=, produire_complet=) onglet qui se recharge seul tant qu'il est à l'écran ·
+#       lignes en SEGMENTS [(texte, rôle), …] dans « groupes » et « texte », rôles ROLES_LIGNE ·
+#       avant_plan() rend le terminal le temps d'une commande · texte_ligne(), plier_segments()
+REVISION = 9
 
 class Quitter(Exception):
     """Lever ceci depuis une action FERME l'interface et rend le code 5, avec une valeur pour l'appelant.
@@ -640,11 +648,80 @@ def ordonner(presents, reference):
     return rangés + [t for t in vus if t not in rangés]
 
 
+# Rôles qu'une LIGNE peut demander pour un de ses morceaux, et le rôle de palette correspondant.
+# Pourquoi des noms de SENS et non des couleurs : un appelant qui écrirait « vert » ne suivrait pas le
+# thème et ne se dégraderait pas là où il n'y a pas de couleurs — or c'est précisément là que ses
+# machines tournent (un NAS rapporte COLORS=0). Il dit ce que la chose EST, le socle choisit comment
+# le montrer. Les noms internes (« onglet » pour le vert, « titre » pour le jaune) ne sont pas
+# publiables tels quels : ils nomment leur origine, pas leur sens.
+ROLES_LIGNE = {"bon": "onglet", "mauvais": "mauvais", "avertir": "titre",
+               "discret": "portee", "vedette": "touche", "commande": "commande"}
+
+# Touches que le socle emploie partout, et qu'un onglet ne peut donc pas s'approprier : une touche qui
+# recharge dans trois onglets et répare dans le quatrième est un piège, et le pied l'annonce partout.
+# Refusé à la CONSTRUCTION de l'onglet (donc avant curses, et de façon reproductible) plutôt que
+# silencieusement ignoré : une touche morte qui ne se voit qu'une fois déployée, on connaît.
+TOUCHES_RESERVEES = tuple("qQrRgGjk/?123456789 \t\n\r\x1b\x02\x04\x06\x15\x7f\b")
+
+
+def texte_ligne(ligne):
+    """Le texte nu d'une ligne, qu'elle soit une chaîne ou une liste de segments [(texte, rôle), …].
+
+    Le filtre, les décomptes et les repères de ligne travaillent là-dessus : ils doivent voir ce que
+    l'utilisateur LIT, pas la façon dont c'est peint."""
+    if isinstance(ligne, str):
+        return ligne
+    return "".join(t for t, _ in ligne)
+
+
+def _recoller(caracteres):
+    """[(caractère, rôle), …] → [(texte, rôle), …] en recollant ce qui a le même rôle."""
+    segments = []
+    for c, role in caracteres:
+        if segments and segments[-1][1] == role:
+            segments[-1] = (segments[-1][0] + c, role)
+        else:
+            segments.append((c, role))
+    return segments
+
+
+def plier_segments(segments, largeur):
+    """plier(), mais pour une ligne en segments : chaque caractère emporte son rôle au pli.
+
+    Replier le texte seul puis recoller les rôles ne marche pas — plier() retire les blancs au point
+    de coupure, donc les positions ne se retrouvent plus. On plie donc les caractères eux-mêmes, avec
+    la même règle, pour que les deux genres de lignes se replient identiquement."""
+    caracteres = [(c, role) for texte, role in segments for c in texte]
+    if largeur < 8:                       # place dérisoire : on ne plie pas, on coupe (comme plier)
+        return [_recoller(caracteres[: max(1, largeur)])]
+    lignes = []
+    while caracteres:
+        if len(caracteres) <= largeur:
+            lignes.append(_recoller(caracteres))
+            break
+        coupe = -1
+        for i in range(min(largeur, len(caracteres) - 1), -1, -1):
+            if caracteres[i][0] == " ":
+                coupe = i
+                break
+        if coupe <= 0:
+            coupe = largeur
+        tete = caracteres[:coupe]
+        while tete and tete[-1][0] == " ":
+            tete.pop()
+        lignes.append(_recoller(tete))
+        caracteres = caracteres[coupe:]
+        while caracteres and caracteres[0][0] == " ":
+            caracteres.pop(0)
+    return lignes or [[]]
+
+
 class Onglet:
     """Un onglet : un titre, de quoi produire son contenu (chargé à la première ouverture et gardé)."""
 
     def __init__(self, titre, produire, genre="texte", action=None, comptes=True, vocabulaire=None,
-                 apercu=None, aide=None):
+                 apercu=None, aide=None, touches=None, action_libelle=None,
+                 rafraichir=0, rafraichir_complet=0, produire_complet=None):
         self.titre = titre
         # Les noms que CET onglet sait être des commandes, pour qu'ils prennent leur couleur quand une
         # description les cite. Le socle ne les devine pas : lui seul ignore ce qui est une commande
@@ -654,6 +731,33 @@ class Onglet:
         self.genre = genre
         self.comptes = comptes      # False : pas de nombre à côté des noms (groupe de réglage)
         self.action = action
+        # D'AUTRES actions que Entrée : {"a": ("attacher", fn), …}, fn(nom) ayant le contrat d'action.
+        # Le libellé sert au pied et à l'aide : une touche dont on ne sait pas ce qu'elle fait n'existe
+        # pas plus qu'une touche absente.
+        self.touches = dict(touches or {})
+        for t, paire in self.touches.items():
+            if not isinstance(t, str) or len(t) != 1:
+                raise ValueError("onglet « %s » : « %r » n'est pas une touche d'un seul caractère" % (titre, t))
+            if t in TOUCHES_RESERVEES:
+                raise ValueError("onglet « %s » : la touche « %s » est réservée au socle (%s) — libres : %s"
+                                 % (titre, t, "q Q r R g G j k / ? chiffres Tab Entrée Échap espace Ctrl",
+                                    " ".join(c for c in "abcdefhilmnopstuvwxyz" if c not in TOUCHES_RESERVEES)))
+            if not (isinstance(paire, (tuple, list)) and len(paire) == 2 and callable(paire[1])):
+                raise ValueError("onglet « %s » : touche « %s » attend (libellé, fonction)" % (titre, t))
+        # Ce que fait Entrée, en mots. Sans lui le pied dit « appliquer », qui ne dit rien quand il y a
+        # cinq actions à côté.
+        self.action_libelle = action_libelle
+        # Onglet VIVANT : rechargé tous les `rafraichir` secondes, et seulement quand il est à l'écran.
+        # Un onglet qu'on ne regarde pas ne coûte rien : le socle n'arme un délai d'attente du clavier
+        # que pour l'onglet affiché, et dort autrement. `produire_complet` est appelé à la place de
+        # `produire` toutes les `rafraichir_complet` secondes : le socle ne sait pas ce que « complet »
+        # veut dire chez l'appelant, donc c'est l'appelant qui le dit — plutôt que de changer la
+        # signature de produire(), dont dépendent tous les onglets déjà écrits.
+        self.rafraichir = max(0, rafraichir or 0)
+        self.rafraichir_complet = max(0, rafraichir_complet or 0)
+        self.produire_complet = produire_complet
+        self.dernier_chargement = 0.0
+        self.dernier_complet = 0.0
         # aide() → liste de lignes, montrée par « ? » dans une grande fenêtre. Chargée à la première
         # ouverture et gardée, comme un producteur. Sans elle, la touche n'existe pas.
         self.aide = aide
@@ -676,12 +780,28 @@ class Onglet:
     def charger(self):
         if self.contenu is None:
             self.contenu = self.produire()
+            self.dernier_chargement = self.dernier_complet = time.monotonic()
         return self.contenu
 
     def recharger(self):
         self.contenu = None
         self.haut = 0
         self.charger()
+
+    def recharger_en_place(self, complet=False):
+        """Recharge le contenu en GARDANT la sélection, le défilement et le volet actif.
+
+        C'est ce qui sépare un onglet vivant d'un onglet qui clignote : un rechargement toutes les
+        deux secondes qui ramène en haut de la liste rend l'onglet inutilisable, et une action qui
+        fait sauter la sélection oblige à retrouver sa place après chaque geste. Les bornes sont
+        laissées au dessin, qui seul connaît le nombre de lignes et la hauteur réelle."""
+        produire = self.produire_complet if (complet and self.produire_complet) else self.produire
+        self.contenu = produire()
+        maintenant = time.monotonic()
+        self.dernier_chargement = maintenant
+        if complet:
+            self.dernier_complet = maintenant
+        return self.contenu
 
 
 class Interface:
@@ -867,6 +987,53 @@ class Interface:
             position += len(fragment)
         return segments
 
+    def peindre_roles(self, x, segments):
+        """Segments (texte, rôle) → segments d'écran [(x, texte, attr)].
+
+        Un rôle None vaut « texte nu, sans grammaire » : l'appelant qui décrit lui-même sa ligne la
+        décrit en entier, et une couleur surprise au milieu d'un relevé qu'il a composé serait du
+        bruit. Qu'il demande « commande » s'il en veut une."""
+        sortie, position = [], x
+        for texte, role in segments:
+            if not self.utf8:
+                texte = ascii_lisible(texte)       # avant de compter : « … » vaut trois colonnes
+            if role is None:
+                attr = 0
+            else:
+                cle = ROLES_LIGNE.get(role)
+                if cle is None:                    # défaut de l'appelant : bruyant, jamais une couleur fausse
+                    raise ValueError("rôle de ligne inconnu : %r — connus : %s"
+                                     % (role, ", ".join(sorted(ROLES_LIGNE))))
+                # les PAIRES et non attr() : sans couleurs, la coloration ne fait RIEN du tout. Avec
+                # attr(), « bon » et « avertir » passeraient en gras et « mauvais » non — le plus
+                # grave des quatre serait le seul à ne rien montrer.
+                attr = self.jeu().get(cle, 0)
+            if sortie and sortie[-1][2] == attr:   # recoller ce qui a la même couleur
+                x0, avant, _ = sortie[-1]
+                sortie[-1] = (x0, avant + texte, attr)
+            else:
+                sortie.append((position, texte, attr))
+            position += len(texte)
+        return sortie
+
+    def ligne_ecran(self, o, ligne, x, retrait, utile):
+        """Une ligne de contenu → la ou les lignes d'écran qu'elle occupe, pliée.
+
+        Un seul chemin pour les trois endroits qui affichent du contenu (volet de contenu, volet droit
+        d'un groupe, fenêtre d'aide) : le même pliage, les mêmes repères, les mêmes rôles. Ils étaient
+        écrits trois fois, et l'aperçu brut a montré ce que cela coûte — une correction sur deux."""
+        if self.filet(ligne):
+            return [[(x, self.h_trait * max(1, utile), self.attr("portee"))]]
+        if not isinstance(ligne, str):
+            morceaux = plier_segments(ligne, max(1, utile))
+            return [self.peindre_roles(x if i == 0 else retrait, m) for i, m in enumerate(morceaux)]
+        style = self.style_ligne(ligne)
+        morceaux = plier(ligne, max(1, utile))
+        ecran = [self.peindre(x, morceaux[0], style, o.vocabulaire, True)]
+        for suite in morceaux[1:]:
+            ecran.append(self.peindre(retrait, suite, style, o.vocabulaire))
+        return ecran
+
     def rendre(self, o, ecran, haut, hauteur, largeur):
         """Le défilement, le compteur et le tracé, une seule fois pour les trois genres."""
         o.haut = max(0, min(o.haut, max(0, len(ecran) - hauteur)))
@@ -919,8 +1086,16 @@ class Interface:
         if self.deux_volets(o):
             # sans cela, on ne sait pas ce que les flèches vont déplacer
             aide = ("[%s] Tab change de volet · " % ("liste" if o.focus == "gauche" else "contenu")) + aide
-        if o.genre == "groupes" and o.action:
-            aide = "Entrée appliquer · " + aide
+        if o.genre == "groupes" and (o.action or o.touches):
+            sep = " · " if self.utf8 else " . "
+            propres = []
+            if o.action:
+                propres.append("Entrée " + (o.action_libelle or "appliquer"))
+            propres += ["%s %s" % (t, libelle) for t, (libelle, _) in o.touches.items()]
+            # Les touches de l'onglet d'abord : ce sont les seules que l'utilisateur ne peut pas
+            # deviner, et ce sont elles qui agissent. L'aide générale cède la place si tout ne tient
+            # pas, et « ? » montre la liste entière.
+            aide = sep.join(propres) + sep + aide
         if o.aide:
             # annoncée là où les touches sont annoncées : une aide qu'on ne sait pas demander n'existe pas
             aide = ("? aide · " if self.utf8 else "? aide . ") + aide
@@ -933,11 +1108,23 @@ class Interface:
         else:
             self.ecrire(h - 1, 0, "  " + aide, self.attr("portee"))
 
+    def lignes_touches(self, o):
+        """Les actions de CET onglet, en tête de son aide : le pied les tronque quand elles sont cinq,
+        et une touche qu'on ne peut pas lire en entier quelque part n'est pas vraiment offerte."""
+        if not (o.action or o.touches):
+            return []
+        lignes = ["== Touches de cet onglet"]
+        if o.action:
+            lignes.append("  Entrée   %s" % (o.action_libelle or "appliquer"))
+        for t, (libelle, _) in o.touches.items():
+            lignes.append("  %-8s %s" % (t, libelle))
+        return lignes + ["---"]
+
     def garder(self, textes):
         if not self.filtre:
             return textes
         f = self.filtre.lower()
-        return [t for t in textes if f in t.lower()]
+        return [t for t in textes if f in texte_ligne(t).lower()]
 
     def compteur(self, haut, hauteur, largeur, debut, total):
         """Mémorise « 12/86 » ; c'est pied() qui l'écrira, DANS son filet.
@@ -1028,7 +1215,8 @@ class Interface:
         groupes = o.charger()
         if self.filtre:
             f = self.filtre.lower()
-            groupes = [(n, [l for l in ls if f in l.lower()] if f not in n.lower() else ls) for n, ls in groupes]
+            groupes = [(n, [l for l in ls if f in texte_ligne(l).lower()] if f not in n.lower() else ls)
+                       for n, ls in groupes]
             groupes = [(n, ls) for n, ls in groupes if ls]
         if not groupes:
             self.ecrire(haut + 1, 2, "rien ne correspond à « %s »" % self.filtre if self.filtre else "(rien à afficher)",
@@ -1046,15 +1234,7 @@ class Interface:
         o.hauteur = hauteur         # les pages portent sur ce qui DÉFILE, pas sur l'aperçu
         ecran = []
         for l in lignes:
-            if self.filet(l):
-                ecran.append([(colonne + 2, self.h_trait * max(1, largeur - colonne - 3),
-                               self.attr("portee"))])
-                continue
-            style = self.style_ligne(l)
-            morceaux = plier(l, max(1, largeur - colonne - 3))
-            ecran.append(self.peindre(colonne + 2, morceaux[0], style, o.vocabulaire, True))
-            for suite in morceaux[1:]:
-                ecran.append(self.peindre(colonne + 5, suite, style, o.vocabulaire))
+            ecran.extend(self.ligne_ecran(o, l, colonne + 2, colonne + 5, largeur - colonne - 3))
         self.rendre(o, ecran, haut, hauteur, largeur)
 
     def preparer_apercu(self, o, groupe):
@@ -1113,14 +1293,7 @@ class Interface:
         try:
             ecran = []
             for l in bloc["lignes"]:
-                if self.filet(l):
-                    ecran.append([(colonne + 2, self.h_trait * largeur_utile, self.attr("portee"))])
-                else:
-                    style = self.style_ligne(l)
-                    morceaux = plier(l, largeur_utile)
-                    ecran.append(self.peindre(colonne + 2, morceaux[0], style, o.vocabulaire, True))
-                    for suite in morceaux[1:]:
-                        ecran.append(self.peindre(colonne + 5, suite, style, o.vocabulaire))
+                ecran.extend(self.ligne_ecran(o, l, colonne + 2, colonne + 5, largeur_utile))
                 if len(ecran) >= maxi:
                     break
             ecran = ecran[:maxi]
@@ -1139,10 +1312,14 @@ class Interface:
         Cinquième repère, ajouté parce qu'un appelant ne peut pas le faire lui-même sans se tromper :
         écrire « ──── » à la main donne des « [?] » sous une locale non UTF-8, et c'est au socle de
         choisir le caractère selon le terminal."""
-        nu = l.strip()
+        nu = texte_ligne(l).strip()
         return len(nu) >= 3 and set(nu) <= set("-\u2500")
 
     def style_ligne(self, l):
+        # Une ligne en SEGMENTS a déjà dit ce que chacun de ses morceaux est : lui appliquer en plus un
+        # style de ligne entière effacerait précisément ce qu'elle décrit.
+        if not isinstance(l, str):
+            return 0
         nu = l.strip()
         if nu.startswith("=="):
             return self.attr("titre", True)
@@ -1162,14 +1339,7 @@ class Interface:
         # couramment des lignes de 90 à 110 caractères (chemin, branche, commit, thème sur une ligne).
         ecran = []
         for l in lignes:
-            if self.filet(l):
-                ecran.append([(1, self.h_trait * max(1, largeur - 3), self.attr("portee"))])
-                continue
-            style = self.style_ligne(l)
-            morceaux = plier(l, max(1, largeur - 2))
-            ecran.append(self.peindre(1, morceaux[0], style, o.vocabulaire, True))
-            for suite in morceaux[1:]:
-                ecran.append(self.peindre(4, suite, style, o.vocabulaire))
+            ecran.extend(self.ligne_ecran(o, l, 1, 4, largeur - 2))
         self.rendre(o, ecran, haut, hauteur, largeur)
 
     def dessiner(self):
@@ -1241,15 +1411,8 @@ class Interface:
         # Le contenu se plie, se colore et porte les mêmes repères que les onglets « texte » : une
         # aide est du texte de cet outil, pas un objet à part qui aurait ses propres règles.
         ecran = []
-        for ligne in o.aide_contenu:
-            if self.filet(ligne):
-                ecran.append([(x0 + 2, self.h_trait * max(1, larg - 4), cadre)])
-                continue
-            style = self.style_ligne(ligne)
-            morceaux = plier(ligne, max(1, larg - 4))
-            ecran.append(self.peindre(x0 + 2, morceaux[0], style, o.vocabulaire, True))
-            for suite in morceaux[1:]:
-                ecran.append(self.peindre(x0 + 4, suite, style, o.vocabulaire))
+        for ligne in self.lignes_touches(o) + o.aide_contenu:
+            ecran.extend(self.ligne_ecran(o, ligne, x0 + 2, x0 + 4, larg - 4))
         o.aide_haut = borne(o.aide_haut, len(ecran), interieur)
         for i in range(interieur):
             # EFFACER d'abord toute la largeur intérieure. Sans cela, chaque ligne n'écrivait que ses
@@ -1327,9 +1490,17 @@ class Interface:
                 o.rang = max(0, o.debut_noms + (y - haut_zone))
                 o.haut = 0
 
-    def appliquer(self):
+    def appliquer(self, touche=None):
+        """Lance l'action de Entrée (touche=None) ou celle d'une touche propre à l'onglet.
+
+        Même contrat dans les deux cas : la fonction reçoit le nom du groupe choisi, rend un message
+        ou lève Quitter. Et dans les deux cas l'onglet est rechargé EN PLACE — une action qui ferait
+        sauter la sélection obligerait à retrouver sa place après chaque geste."""
         o = self.onglets[self.actif]
-        if o.genre != "groupes" or not o.action or not o.contenu:
+        if o.genre != "groupes" or not o.contenu:
+            return
+        agir = o.action if touche is None else (o.touches.get(touche) or (None, None))[1]
+        if not agir:
             return
         groupes = o.contenu
         if self.filtre:                               # le rang porte sur la liste filtrée
@@ -1339,7 +1510,7 @@ class Interface:
             return
         nom = groupes[max(0, min(o.rang, len(groupes) - 1))][0]
         try:
-            self.message = o.action(nom) or ""
+            self.message = agir(nom) or ""
             # une action peut CHANGER le thème du shell : sans cela, le nouveau réglage ne se verrait
             # qu'à la réouverture de l'interface
             self.couleurs(True)
@@ -1347,19 +1518,62 @@ class Interface:
             raise                        # un ordre de sortie n'est pas un échec d'action
         except Exception as e:
             self.message = "échec : %s" % e
-        rang = o.rang
-        o.recharger()
-        o.rang = rang
+        try:
+            o.recharger_en_place()
+        except Quitter:
+            raise
+        except Exception as e:
+            self.message = "%s (et le rechargement a échoué : %s)" % (self.message, e)
+
+    def echeance(self, o):
+        """Recharge l'onglet AFFICHÉ si son intervalle est écoulé. Lui seul : un onglet qu'on ne
+        regarde pas ne doit rien coûter, et rien ne justifie de lancer des commandes pour une liste
+        que personne n'a sous les yeux."""
+        if not o.rafraichir:
+            return
+        maintenant = time.monotonic()
+        complet = bool(o.rafraichir_complet and o.produire_complet
+                       and maintenant - o.dernier_complet >= o.rafraichir_complet)
+        if not complet and maintenant - o.dernier_chargement < o.rafraichir:
+            return
+        try:
+            o.recharger_en_place(complet)
+        except Quitter:
+            raise
+        except Exception as e:
+            # Un producteur qui échoue toutes les deux secondes noierait le pied de messages et
+            # relancerait sans fin ce qui vient d'échouer. On ARRÊTE le rafraîchissement et on le dit :
+            # « R » reste là pour réessayer quand la cause est levée.
+            o.rafraichir = 0
+            self.message = "rafraîchissement arrêté (%s) — R pour réessayer" % e
 
     def boucle(self):
         rates = 0
         while True:
+            o_vu = self.onglets[self.actif]
+            try:
+                self.echeance(o_vu)
+            except Quitter:
+                raise
             self.dessiner()
+            # Délai d'attente du clavier UNIQUEMENT pour un onglet vivant affiché : sans cela, la
+            # boucle se réveillerait pour rien dans tous les autres cas.
+            attente = o_vu.rafraichir
+            try:
+                self.ecran.timeout(int(max(0.1, attente) * 1000) if attente else -1)
+            except curses.error:
+                attente = 0
+            depart = time.monotonic()
             try:
                 touche = self.ecran.get_wch()
                 rates = 0
             except curses.error:
-                # entrée fermée (tuyau, pseudo-terminal sans clavier) : sortir plutôt que tourner à vide
+                # Deux causes pour la MÊME erreur, et il faut les distinguer : le délai qui expire
+                # (normal, on redessine) et l'entrée fermée (tuyau, pseudo-terminal sans clavier), où
+                # il faut sortir plutôt que tourner à 100 % de processeur. Deux signes concordants :
+                # l'entrée n'est pas à la fin de son fichier, et l'attente a bien duré.
+                if attente and not _entree_morte() and time.monotonic() - depart >= attente * 0.5:
+                    continue
                 rates += 1
                 if rates > 20:
                     return
@@ -1451,6 +1665,101 @@ class Interface:
             elif touche in ("r", "R"):
                 self.onglets[self.actif].recharger()
                 self.message = "onglet rechargé"
+            elif isinstance(touche, str) and touche in self.onglets[self.actif].touches:
+                # EN DERNIER : le socle garde ses touches, un onglet ne peut pas les lui reprendre.
+                # La construction de l'Onglet refuse déjà les réservées, ceci en est le filet.
+                self.appliquer(touche)
+
+
+# L'interface ouverte, s'il y en a une. Elle est forcément UNIQUE (une seule par processus, dans
+# lancer()), et avant_plan() a besoin de l'écran sans que l'appelant ait à le faire circuler jusqu'à
+# ses actions — il n'y a rien à transmettre, donc rien à oublier de transmettre.
+_INTERFACE = None
+
+
+def _entree_morte():
+    """Vrai si l'entrée standard est à la fin de son fichier — tuyau fermé, pseudo-terminal sans
+    clavier. C'est ce qui DISTINGUE une attente qui expire normalement d'une entrée qui ne donnera
+    plus jamais rien, et il fallait un signe qui ne dépende pas d'une mesure de temps : une attente
+    armée qui rend la main vite est un indice, pas une preuve, et se tromper d'un côté fait sortir une
+    interface vivante, de l'autre tourner une boucle à 100 % de processeur.
+
+    Un terminal au repos n'a RIEN à lire ; une entrée fermée, elle, est « prête à lire » et ne rend
+    rien. On ne lit donc jamais vraiment : savoir qu'il y a quelque chose suffit, et prendre l'octet
+    le volerait au clavier."""
+    try:
+        fd = sys.stdin.fileno()
+    except (AttributeError, ValueError, OSError):
+        return False
+    try:
+        pret, _, _ = select.select([fd], [], [], 0)
+    except (OSError, ValueError, select.error):
+        return False
+    return bool(pret)
+
+
+def _armer_souris(actif=True):
+    """Arme ou désarme les rapports de souris. Désarmer avant de rendre le terminal n'est pas un
+    détail : sinon le programme lancé en avant-plan reçoit les rapports de molette comme des
+    caractères, et son invite se remplit de « \x1b[M ». Un terminal qui ne gère pas la souris ne doit
+    rien casser dans les deux sens."""
+    try:
+        curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION if actif else 0)
+        if actif:
+            curses.mouseinterval(0)
+    except (curses.error, AttributeError):
+        pass
+
+
+def avant_plan(argv, cwd=None, env=None, attendre=True):
+    """REND le terminal, lance la commande en avant-plan, puis reprend l'interface là où elle était.
+
+    Pour une commande qui a besoin du terminal : elle peut écrire, poser une question « o/N », ouvrir
+    un éditeur. Appelable depuis une action. Rend le code de sortie de la commande.
+
+    Pourquoi dans le socle, alors que Quitter existe déjà : Quitter FERME l'interface et rend la main à
+    l'appelant, ce qui est juste pour « attacher une session tmux » (on ne revient pas) mais pas pour
+    une commande dont on veut voir le résultat avant de continuer — il fallait relancer lancer(), donc
+    reconstruire les onglets et perdre la sélection. Ici on revient exactement où l'on était.
+
+    Le terminal est TOUJOURS rendu à l'interface, même si la commande explose : la restauration est
+    dans un finally. Hors interface (aucune ouverte), la commande est simplement lancée."""
+    inter = _INTERFACE
+    if inter is None:                      # appelé hors curses : rien à sauver, rien à restaurer
+        try:
+            return subprocess.call(list(argv), cwd=cwd, env=env)
+        except OSError as e:
+            sys.stderr.write("%s\n" % e)
+            return 127
+    code = 127
+    try:
+        curses.def_prog_mode()             # garder le mode « programme » pour y revenir tel quel
+        _armer_souris(False)
+        curses.endwin()
+        try:
+            code = subprocess.call(list(argv), cwd=cwd, env=env)
+        except OSError as e:
+            sys.stderr.write("%s\n" % e)
+        if attendre:
+            # Sans cela, l'interface se redessine par-dessus la sortie de la commande avant qu'on ait
+            # pu la lire : le travail est fait et invisible, ce qui revient à ne pas l'avoir fait.
+            sys.stdout.write("\n[Entrée] pour revenir à l'interface ")
+            sys.stdout.flush()
+            try:
+                sys.stdin.readline()
+            except (OSError, ValueError, KeyboardInterrupt):
+                pass
+    finally:
+        curses.reset_prog_mode()
+        _armer_souris(True)
+        try:
+            curses.update_lines_cols()     # la commande a pu changer la taille de la fenêtre
+        except (curses.error, AttributeError):
+            pass
+        inter.ecran.clearok(True)          # repartir d'un écran vierge : le terminal porte autre chose
+        inter.ecran.redrawwin()
+        inter.ecran.refresh()
+    return code
 
 
 def lancer(onglets, nom=""):
@@ -1462,7 +1771,7 @@ def lancer(onglets, nom=""):
     5 si une action a levé Quitter : le terminal est rendu, et onglets.QUITTE porte la valeur donnée.
     L'appelant fait alors ce qui ne peut se faire qu'hors de curses (attacher une session, par
     exemple) ; ce module n'exécute rien."""
-    global QUITTE
+    global QUITTE, _INTERFACE
     QUITTE = None                        # jamais la valeur d'une séance précédente
     if not onglets or not sys.stdin.isatty() or not sys.stdout.isatty():
         print("%s : pas de terminal pour l'interface" % (nom or "interface"), file=sys.stderr)
@@ -1485,14 +1794,15 @@ def lancer(onglets, nom=""):
         except curses.error:
             pass
         ecran.keypad(True)
-        try:                            # souris : un terminal qui ne la gère pas ne doit rien casser
-            curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
-            curses.mouseinterval(0)
-        except (curses.error, AttributeError):
-            pass
+        _armer_souris(True)
+        global _INTERFACE
         interface = Interface(ecran, onglets, nom)
         interface.couleurs()
-        interface.boucle()
+        _INTERFACE = interface
+        try:
+            interface.boucle()
+        finally:
+            _INTERFACE = None          # plus d'interface ouverte : avant_plan() ne doit pas y croire
 
     try:
         curses.wrapper(demarrer)
