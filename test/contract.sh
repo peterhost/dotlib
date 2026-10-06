@@ -296,5 +296,36 @@ OUT=$(HOME="$H" PATH="$FAUXGIT:$PATH" sh "$ROOT/bin/deploy-local" --check --remo
 OUT=$(HOME="$H" sh "$ROOT/bin/deploy-local" --check --json 2>&1); RC=$?
 [ $RC != 6 ] && ok "sans --remote : aucun accès au dépôt, aucun verdict sur le distant" || ko "sans --remote ($RC)" "$OUT"
 
+# --- js() : un octet qui n'est pas de l'UTF-8 valide ne doit pas tronquer le JSON -------------------
+# Sous macOS en locale UTF-8, un tel octet fait QUITTER sed, tr, awk et cut. Un message d'erreur de git
+# peut en citer un : le champ serait alors tronqué, le document invalide, et l'appelant perdrait TOUS
+# les champs en silence — c'est le défaut du 28/09 (une couleur ANSI rendait le JSON illisible et
+# l'interface affichait « dégradé — » sans dire pourquoi). Signalé par la session ~/.bash le 06/10.
+# Le test extrait js() du script et la nourrit d'octets invalides, sous une locale UTF-8 explicite.
+# Extraction de la fonction entière, quelle que soit sa longueur : de sa première ligne jusqu'à
+# celle qui la ferme. Un « head -4 » se périmerait au premier retour à la ligne ajouté.
+extrait_js=$(LC_ALL=C awk '/^js\(\) \{/{p=1} p{print} p && /; \}$/{exit}' "$ROOT/bin/deploy-local")
+[ -n "$extrait_js" ] || ko "js() : fonction introuvable dans bin/deploy-local (test inopérant)" ""
+sale=$(printf 'erreur \351\350 git: pathspec \377\376 inconnu')
+OUT=$(LC_ALL=fr_FR.UTF-8 sh -c "$extrait_js
+js \"\$1\"" _ "$sale" 2>/dev/null)
+# le résultat doit être un champ JSON COMPLET : guillemet ouvrant, guillemet fermant, et le texte entre
+case $OUT in
+  '"'*'"') ok "js() : un octet non-UTF-8 ne tronque pas le champ JSON" ;;
+  *) ko "js() : champ tronqué sous locale UTF-8" "$OUT" ;;
+esac
+case $OUT in
+  *"erreur"*) ok "js() : le début du message survit" ;;
+  *) ko "js() : le début du message a disparu" "$OUT" ;;
+esac
+case $OUT in
+  *"inconnu"*) ok "js() : et la FIN aussi (c'est elle que la troncature emportait)" ;;
+  *) ko "js() : la fin du message a été coupée" "$OUT" ;;
+esac
+# et le JSON produit par --check reste lisible quoi qu'il arrive
+run "$H" --check --json
+printf '%s' "$OUT" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
+  && ok "--check --json : document valide au sens strict" || ko "--check --json : JSON invalide" "$OUT"
+
 printf '\n%s%d réussis%s, %d échecs\n' "$G" "$PASS" "$N" "$FAIL"
 [ $FAIL -eq 0 ]

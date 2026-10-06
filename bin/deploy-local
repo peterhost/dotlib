@@ -79,8 +79,14 @@ say() { [ "$QUIET" = 1 ] || echo "dotlib : $*" >&2; }
 # retirés. Un octet d'échappement non échappé rend le document invalide au sens strict, et un lecteur
 # rigoureux rejette alors le JSON ENTIER — donc tous les champs disparaissent, en silence. C'est arrivé
 # dans un dépôt voisin : une valeur colorée, et l'outil d'en face n'affichait plus rien sans dire pourquoi.
+# LC_ALL=C sur les QUATRE étages, pas seulement les deux premiers. Sous macOS en locale UTF-8, un
+# octet qui n'est pas de l'UTF-8 valide fait quitter sed, tr, awk et cut — et un message d'erreur de
+# git peut en citer un. Le champ JSON serait alors tronqué, donc le document invalide, donc TOUS les
+# champs perdus en silence chez l'appelant : c'est exactement le défaut du 28/09 (une couleur ANSI
+# rendait le JSON illisible et l'interface affichait « dégradé — » sans dire pourquoi).
 js() { printf '"%s"' "$(printf '%s' "$1" | LC_ALL=C sed 's/'"$(printf '\033')"'\[[0-9;]*[A-Za-z]//g' \
-  | LC_ALL=C tr -d '\000-\010\013\014\016-\037' | tr '\n\t' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+  | LC_ALL=C tr -d '\000-\010\013\014\016-\037' | LC_ALL=C tr '\n\t' '  ' \
+  | LC_ALL=C sed 's/\\/\\\\/g; s/"/\\"/g')"; }
 jb() { if [ "$1" = 1 ]; then printf true; else printf false; fi; }
 G() { git "$@" </dev/null; }
 
@@ -115,7 +121,7 @@ detect() {
   # consulter le dépôt et qu'il est injoignable, le dire, au lieu de répondre que tout va bien.
   REMOTE_COMMIT=; REMOTE_VU=0
   if [ "$REMOTE" = 1 ] && [ "$KIND" = git ]; then
-    REMOTE_COMMIT=$(G ls-remote "${ORIGIN:-$REPO_URL}" "refs/heads/$BRANCH" 2>/dev/null | cut -c1-7)
+    REMOTE_COMMIT=$(G ls-remote "${ORIGIN:-$REPO_URL}" "refs/heads/$BRANCH" 2>/dev/null | LC_ALL=C cut -c1-7)
     [ -n "$REMOTE_COMMIT" ] && REMOTE_VU=1
   fi
   # Statut et code
@@ -145,7 +151,7 @@ state_json() {
     "$(jb "$INSTALLED")" "$(js "$KIND")" "$(js "$STATUS")" "$(js "$WHY")" "$(js "$DIR")" "$(js "$COMMIT")" \
     "$(js "$EXPECT")" "$(js "$REMOTE_COMMIT")" "$(jb "$REMOTE_VU")" "$(js "$ORIGIN")" "$(jb "$SHALLOW")" "$(jb "$DIRTY")" "$(js "$API")" \
     "$(js "$PB")" "$(js "$PDATE")" "$(js "${LEFTOVERS# }")" "$(jb "$LOCK_STALE")" \
-    "$(js "$(git --version 2>/dev/null | sed 's/^git version //')")" "$CODE"
+    "$(js "$(git --version 2>/dev/null | LC_ALL=C sed 's/^git version //')")" "$CODE"
 }
 
 finish() {   # finish ACTION : dernier état, sortie
@@ -209,9 +215,9 @@ if ! command -v git >/dev/null 2>&1; then
     Linux)
       if [ -f /etc/synoinfo.conf ] || [ -d /var/packages ]; then
         hint="paquet Git Server dans DSM, ou opkg install git git-http (Entware)"
-      elif [ -r /etc/os-release ] && grep -qiE 'debian|ubuntu|raspbian|osmc|mint' /etc/os-release; then
+      elif [ -r /etc/os-release ] && LC_ALL=C grep -qiE 'debian|ubuntu|raspbian|osmc|mint' /etc/os-release; then
         hint="sudo apt install git"
-      elif [ -r /etc/os-release ] && grep -qiE 'fedora|rhel|centos' /etc/os-release; then
+      elif [ -r /etc/os-release ] && LC_ALL=C grep -qiE 'fedora|rhel|centos' /etc/os-release; then
         hint="sudo dnf install git"
       else hint="installe git avec le gestionnaire de paquets de cette machine"; fi ;;
     *) hint="installe git avec le gestionnaire de paquets de cette machine" ;;
