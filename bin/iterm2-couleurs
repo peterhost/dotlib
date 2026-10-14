@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""bin/iterm2-couleurs — pose les couleurs d'une palette dotlib dans un profil dynamique iTerm2.
+
+    iterm2-couleurs [--palette P] [--theme auto|dark|light] [--profil NOM] [--verifier] CHEMIN.json
+
+iTerm2 relit à chaud les « profils dynamiques » : un fichier JSON déposé dans le dossier qu'il
+surveille, sans relance ni interaction. Ce programme ouvre ce fichier et ne remplace QUE les clés de
+couleur du profil visé — raccourci, parent, Guid, fenêtre, tout le reste est relu et réécrit tel quel,
+dans son ordre d'origine. Le chemin du fichier et le nom du profil viennent de l'appelant : dotlib ne
+sait pas où ils sont et n'a pas à le savoir.
+
+Thème « auto » : la variante claire va dans le jeu « … (Light) », la sombre dans « … (Dark) », et
+« Use Separate Colors for Light and Dark Mode » passe à vrai — iTerm2 bascule alors seul avec
+l'apparence de macOS, sans que personne n'ait à le lui dire. Les clés SANS suffixe reçoivent la
+variante sombre, toujours, pour qu'un iTerm2 trop ancien pour les suffixes affiche quand même quelque
+chose de cohérent — et pour que le fichier ne change pas à la tombée du jour.
+Thème forcé (dark ou light) : la même variante dans les deux jeux et sans suffixe.
+
+N'ÉCRIT PAS SI RIEN NE CHANGE. iTerm2 recharge le profil à chaque écriture du fichier ; réécrire à
+l'identique ferait recharger pour rien, et clignoter les fenêtres ouvertes.
+
+Codes : 0 conforme (écrit, ou déjà à jour) · 1 fichier illisible, JSON invalide, profil introuvable ·
+2 argument ou palette inconnue. Avec --verifier : n'écrit rien, 0 déjà conforme, 3 il y aurait à écrire.
+"""
+import json
+import os
+import re
+import sys
+
+DOTLIB_DIR = os.environ.get("DOTLIB_DIR") or os.path.join(os.path.expanduser("~"), ".dotlib")
+
+# Les clés iTerm2, dans l'ordre où elles sont écrites. La gauche est le nom dans terminal.tsv.
+CLES = [("bg", "Background Color"), ("fg", "Foreground Color"),
+        ("curseur", "Cursor Color"), ("curseur_texte", "Cursor Text Color"),
+        ("selection", "Selection Color"), ("selection_texte", "Selected Text Color")]
+CLES += [(f"ansi{i}", f"Ansi {i} Color") for i in range(16)]
+SEPARES = "Use Separate Colors for Light and Dark Mode"
+
+
+def erreur(code, texte):
+    print(f"iterm2-couleurs : {texte}", file=sys.stderr)
+    sys.exit(code)
+
+
+def table():
+    """share/terminal.tsv → {(palette, thème): {clé: 'RRGGBB'}}. Les lignes de commentaire sautent."""
+    chemin = os.path.join(DOTLIB_DIR, "share", "terminal.tsv")
+    t = {}
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            for ligne in f:
+                if ligne.startswith("#") or not ligne.strip():
+                    continue
+                champs = ligne.rstrip("\n").split("\t")
+                if len(champs) != 4:
+                    continue
+                palette, theme, cle, hexa = champs
+                t.setdefault((palette, theme), {})[cle] = hexa
+    except OSError as e:
+        erreur(1, f"{chemin} illisible ({e.strerror})")
+    return t
+
+
+def reglages():
+    """DOTLIB_PALETTE et DOTLIB_THEME : local/theme.conf, qu'une variable d'environnement l'emporte.
+
+    Mêmes règles que dotlib_palette_load — un réglage posé par « brc theme » vaut ici aussi."""
+    conf = {}
+    try:
+        with open(os.path.join(DOTLIB_DIR, "local", "theme.conf"), encoding="utf-8") as f:
+            for ligne in f:
+                cle, _, valeur = ligne.rstrip("\n").partition("=")
+                if valeur and re.fullmatch("[a-z]+", valeur):
+                    conf[cle] = valeur
+    except OSError:
+        pass
+    palette = os.environ.get("DOTLIB_PALETTE") or conf.get("DOTLIB_PALETTE") or "catppuccin"
+    theme = os.environ.get("DOTLIB_THEME") or conf.get("DOTLIB_THEME") or "auto"
+    return ("xterm" if palette == "actuel" else palette), theme
+
+
+def couleur(hexa):
+    """'RRGGBB' → le dictionnaire de composantes attendu par iTerm2 (sRGB, opaque)."""
+    r, v, b = (int(hexa[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return {"Alpha Component": 1, "Blue Component": b, "Color Space": "sRGB",
+            "Green Component": v, "Red Component": r}
+
+
+def poser(profil, jeux):
+    """Remplace les clés de couleur du profil. jeux : {'': sombre, ' (Light)': …, ' (Dark)': …}."""
+    for suffixe, couleurs in jeux.items():
+        for cle, nom in CLES:
+            profil[nom + suffixe] = couleur(couleurs[cle])
+    profil[SEPARES] = len(jeux) > 1
+
+
+def main(argv):
+    palette_defaut, theme_defaut = reglages()
+    palette = theme = nom_profil = None
+    verifier = False
+    chemin = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--palette", "--theme", "--profil"):
+            i += 1
+            if i >= len(argv):
+                erreur(2, f"{a} attend une valeur")
+            palette, theme, nom_profil = ((argv[i], theme, nom_profil) if a == "--palette" else
+                                          (palette, argv[i], nom_profil) if a == "--theme" else
+                                          (palette, theme, argv[i]))
+        elif a == "--verifier":
+            verifier = True
+        elif a in ("-h", "--aide", "--help"):
+            print(__doc__.strip())
+            return 0
+        elif a.startswith("-"):
+            erreur(2, f"option inconnue : {a}")
+        elif chemin is None:
+            chemin = a
+        else:
+            erreur(2, "un seul fichier de profil à la fois")
+        i += 1
+    if chemin is None:
+        erreur(2, "il manque le chemin du profil dynamique (JSON)")
+    palette = palette or palette_defaut
+    theme = theme or theme_defaut
+    if theme not in ("auto", "dark", "light"):
+        erreur(2, f"thème inconnu : {theme} (auto, dark ou light)")
+
+    t = table()
+    manquantes = [v for v in ("dark", "light") if (palette, v) not in t]
+    if manquantes:
+        connues = " ".join(sorted({p for p, _ in t}))
+        erreur(2, f"palette inconnue : {palette} (connues : {connues})")
+    for variante in ("dark", "light"):
+        absentes = [c for c, _ in CLES if c not in t[(palette, variante)]]
+        if absentes:
+            erreur(1, f"terminal.tsv : {palette}/{variante} sans {' '.join(absentes)}")
+
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            avant = f.read()
+        document = json.loads(avant)
+    except OSError as e:
+        erreur(1, f"{chemin} illisible ({e.strerror})")
+    except json.JSONDecodeError as e:
+        erreur(1, f"{chemin} : JSON invalide ligne {e.lineno}")
+
+    profils = document.get("Profiles")
+    if not isinstance(profils, list) or not profils:
+        erreur(1, f"{chemin} : aucun profil (clé « Profiles »)")
+    if nom_profil is None:
+        if len(profils) > 1:
+            noms = ", ".join(str(p.get("Name", "?")) for p in profils)
+            erreur(2, f"{len(profils)} profils dans le fichier ({noms}) : lequel ? (--profil NOM)")
+        vise = profils[0]
+    else:
+        vises = [p for p in profils if p.get("Name") == nom_profil]
+        if not vises:
+            erreur(1, f"{chemin} : aucun profil nommé « {nom_profil} »")
+        vise = vises[0]
+
+    sombre, clair = t[(palette, "dark")], t[(palette, "light")]
+    if theme == "auto":
+        jeux = {"": sombre, " (Dark)": sombre, " (Light)": clair}
+    else:
+        retenue = sombre if theme == "dark" else clair
+        jeux = {"": retenue, " (Dark)": retenue, " (Light)": retenue}
+    poser(vise, jeux)
+
+    apres = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+    if apres == avant:
+        return 0
+    if verifier:
+        return 3
+    # Écriture puis renommage : iTerm2 surveille ce dossier, il ne doit jamais voir un fichier à moitié
+    # écrit. Le temporaire est posé À CÔTÉ, donc sur le même système de fichiers — un renommage y est
+    # atomique. Son nom commence par un point : iTerm2 ne lit pas les fichiers cachés.
+    temporaire = os.path.join(os.path.dirname(chemin) or ".",
+                              "." + os.path.basename(chemin) + ".dotlib")
+    try:
+        with open(temporaire, "w", encoding="utf-8") as f:
+            f.write(apres)
+        os.replace(temporaire, chemin)
+    except OSError as e:
+        try:
+            os.unlink(temporaire)
+        except OSError:
+            pass
+        erreur(1, f"{chemin} : écriture impossible ({e.strerror})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

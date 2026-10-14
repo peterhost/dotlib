@@ -157,6 +157,55 @@ _dotlib_theme_resolve() {
   [ -z "${SSH_CONNECTION:-}" ] && export LC_DOTLIB_THEME=$DOTLIB_THEME_EFF
 }
 
+# dotlib_theme_refresh : en mode auto, remesure le thème EN COURS DE SESSION. 0 si le thème effectif
+# a changé (l'appelant redessine ce qu'il a déjà peint), 1 s'il n'a pas bougé ou s'il n'y a rien à
+# mesurer. Sur changement : DOTLIB_THEME_EFF, DOTLIB_THEME_DETECTED et LC_DOTLIB_THEME sont reposés, la
+# mémoire de la sonde est effacée et la palette rechargée — les C_* suivent, l'appelant n'a rien à faire.
+#
+# À appeler à CHAQUE invite, sans condition : l'étranglement est ici, pas chez l'appelant.
+#
+# Pourquoi elle existe : _dotlib_theme_resolve ne mesure qu'au démarrage du shell, et exporte son
+# verdict aux enfants. Un terminal qui suit l'apparence de macOS passe au sombre à la tombée du jour ;
+# un shell ouvert le matin annonçait « light » toute la nuit, et vim — qui CROIT DOTLIB_THEME_EFF —
+# s'ouvrait alors dans la mauvaise variante.
+#
+# Pourquoi elle ne resonde PAS le fond du terminal : la sonde OSC 11 lit /dev/tty en mode brut. À
+# l'invite, une ligne en cours de frappe dort dans le tampon du pilote, « read -t 0 » ne la voit pas, et
+# la sonde l'avalerait. Échanger une couleur fausse le soir contre une ligne de commande mangée au
+# hasard est un mauvais marché. Elle lit donc l'apparence du système, qui est justement ce que le
+# terminal suit quand il bascule tout seul.
+#
+# Coût : AUCUN processus hors mode auto, hors macOS, en ssh, ou dans la fenêtre d'étranglement —
+# DOTLIB_THEME_WATCH secondes (10). Sinon un « defaults » au plus par fenêtre, mesuré 5 ms.
+# bash < 4.2 : rien du tout. Sans printf '%(%s)T' il faudrait un « date » à chaque invite pour
+# seulement SAVOIR s'il faut mesurer — plus cher que ce qu'on cherche à éviter.
+# Limite : en ssh il n'y a rien à mesurer (LC_DOTLIB_THEME est figé à la connexion) ; rend 1 toujours.
+dotlib_theme_refresh() {
+  [ "${DOTLIB_THEME:-auto}" = auto ] || return 1
+  [ "${BASH_VERSINFO[0]:-0}${BASH_VERSINFO[1]:-0}" -ge 42 ] || return 1
+  local maintenant avant=${DOTLIB_THEME_EFF:-}
+  printf -v maintenant '%(%s)T' -1
+  [ $(( maintenant - ${_DOTLIB_THEME_VU:-0} )) -ge "${DOTLIB_THEME_WATCH:-10}" ] || return 1
+  _DOTLIB_THEME_VU=$maintenant                       # jamais exporté : chaque shell a sa propre fenêtre
+  if [ -n "${COLORFGBG:-}" ]; then
+    case ${COLORFGBG##*;} in 7|9|1[0-5]) DOTLIB_THEME_EFF=light ;; *) DOTLIB_THEME_EFF=dark ;; esac
+  elif [ "${DOTLIB_OS:-}" = darwin ] && [ -z "${SSH_CONNECTION:-}" ] &&
+       command -v defaults >/dev/null 2>&1; then
+    case $(defaults read -g AppleInterfaceStyle 2>/dev/null) in
+      Dark) DOTLIB_THEME_EFF=dark ;; *) DOTLIB_THEME_EFF=light ;;
+    esac
+  else
+    return 1
+  fi
+  [ "$DOTLIB_THEME_EFF" = "$avant" ] && return 1
+  export DOTLIB_THEME_EFF
+  export DOTLIB_THEME_DETECTED=$DOTLIB_THEME_EFF     # dotlib_palette_load le relira sans resonder
+  [ -z "${SSH_CONNECTION:-}" ] && export LC_DOTLIB_THEME=$DOTLIB_THEME_EFF
+  rm -f "$_DOTLIB_PROBE_CACHE" 2>/dev/null           # le fond a changé : la mémoire d'hier est fausse
+  dotlib_palette_load
+  return 0
+}
+
 # _dotlib_sgr HEX/IDX [fond] : séquence SGR selon la profondeur (16m : vraies couleurs, sinon 256)
 _dotlib_sgr() {
   local hex=${1%/*} idx=${1#*/} base=38

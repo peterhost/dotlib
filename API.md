@@ -101,6 +101,60 @@ Variables : `TUI_INTERACTIVE`, `TUI_YES` (entrée), `TUI_OK TUI_KO TUI_WARN TUI_
 `palette <TAB> thème <TAB> rôle <TAB> RRGGBB <TAB> index256`. Rôles : `num date text match_fg match_bg key
 path bad note surface text_on_surface crust`. Des lignes et des rôles peuvent s'ajouter.
 
+## `share/terminal.tsv` (révision 3)
+
+`palette <TAB> thème <TAB> clé <TAB> RRGGBB` — **quatre** colonnes, pas cinq comme `palettes.tsv`.
+Clés : `bg fg curseur curseur_texte selection selection_texte ansi0` … `ansi15`, pour les onze
+palettes en sombre et en clair. Des lignes et des clés peuvent s'ajouter.
+
+Il existe parce qu'un terminal ne demande pas ce que demande un texte. `palettes.tsv` ne porte que des
+couleurs de **rôle** ; les rôles donnent du rouge, du jaune, du bleu, du magenta, du cyan, et **pas de
+vert**, et les huit variantes vives n'existent nulle part. Ces couleurs-ci ne se déduisent donc pas de
+celles-là : elles sont reprises de l'amont de chaque palette, et la provenance — amont ou **dérivée** —
+est écrite palette par palette en tête du fichier.
+
+## Thème : rafraîchissement en cours de session (révision 3)
+
+`dotlib_theme_refresh` — aucun argument. **0 si le thème effectif a changé**, 1 s'il n'a pas bougé ou
+s'il n'y a rien à mesurer. Sur changement, `DOTLIB_THEME_EFF`, `DOTLIB_THEME_DETECTED` et
+`LC_DOTLIB_THEME` sont reposés et la palette rechargée : les `C_*` suivent, l'appelant n'a rien à
+faire de plus que redessiner ce qu'il avait déjà peint.
+
+À appeler **à chaque invite, sans condition** : l'étranglement est dans dotlib, pas chez l'appelant.
+Il vaut `DOTLIB_THEME_WATCH` secondes (10). Coût : aucun processus hors mode `auto`, hors macOS, en
+ssh, sous bash < 4.2, ou dans la fenêtre d'étranglement ; sinon un `defaults` au plus par fenêtre.
+
+Elle ne relance **jamais** la sonde OSC 11 : cette sonde lit `/dev/tty` en mode brut, et à l'invite une
+ligne en cours de frappe dort dans le tampon du pilote sans que `read -t 0` la voie — la sonde
+l'avalerait. Elle lit l'apparence du système, qui est justement ce que suit un terminal qui bascule
+seul. Limite : en ssh il n'y a rien à mesurer, `LC_DOTLIB_THEME` étant figé à la connexion.
+
+## `bin/iterm2-couleurs` (révision 3)
+
+```
+iterm2-couleurs [--palette P] [--theme auto|dark|light] [--profil NOM] [--verifier] CHEMIN.json
+```
+
+Pose les couleurs d'une palette dans un **profil dynamique** iTerm2 — un fichier JSON qu'iTerm2 relit
+à chaud. Ne remplace que les clés de couleur du profil visé ; tout le reste est relu et réécrit tel
+quel, dans son ordre d'origine. Le chemin et le nom du profil viennent de l'appelant : dotlib ne sait
+pas où ils sont et n'a pas à le savoir. Sans `--palette` ni `--theme`, les réglages sont ceux que
+`local/theme.conf` et l'environnement résolvent, comme pour `dotlib_palette_load`.
+
+`--theme auto` met la variante claire dans le jeu `… (Light)`, la sombre dans `… (Dark)`, et passe
+`Use Separate Colors for Light and Dark Mode` à vrai : iTerm2 bascule alors seul avec l'apparence de
+macOS. Les clés sans suffixe reçoivent la variante **sombre**, toujours — pour qu'un iTerm2 trop ancien
+affiche quelque chose de cohérent, et pour que le fichier ne change pas à la tombée du jour. Un thème
+forcé met la même variante partout.
+
+**N'écrit pas si rien ne change** : iTerm2 recharge le profil à chaque écriture du fichier.
+L'écriture passe par un temporaire caché posé à côté puis renommé, pour qu'iTerm2 ne voie jamais un
+fichier à moitié écrit.
+
+Codes : `0` conforme (écrit, ou déjà à jour) · `1` fichier illisible, JSON invalide, profil introuvable
+· `2` argument ou palette inconnue. Avec `--verifier` : n'écrit rien, `0` déjà conforme, `3` il y
+aurait à écrire.
+
 ## Pose (`bin/deploy-local`)
 
 Contrat de pose des modules tiers : options `--check` `--json` `--yes` `--dry-run` `--quiet` `--purge`

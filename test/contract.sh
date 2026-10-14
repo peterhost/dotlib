@@ -112,7 +112,7 @@ for b in /bin/bash /opt/homebrew/bin/bash /usr/bin/bash /usr/local/bin/bash /opt
   done
   [ "$bon" = 1 ] && ok "bash $v · pastille : rien que l'icône et le texte de visible (3 profondeurs × 4 formes)"
   out=$(b_ "$b" xterm-256color 'echo "$DOTLIB_API/$DOTLIB_REVISION"')
-  [ "$out" = "1/2" ] && ok "bash $v · DOTLIB_API et DOTLIB_REVISION annoncés" || ko "bash $v · version" "$out"
+  [ "$out" = "1/3" ] && ok "bash $v · DOTLIB_API et DOTLIB_REVISION annoncés" || ko "bash $v · version" "$out"
   out=$(b_ "$b" xterm-256color 'dotlib_palette_load; dotlib_pill -p -c BAD "x" "T"
       case $DOTLIB_PILL in *";5m"*) echo clignote ;; *) echo non ;; esac')
   [ "$out" = clignote ] && ok "bash $v · pastille -c : cœur clignotant (SGR 5)" || ko "bash $v · pastille -c" "$out"
@@ -208,6 +208,137 @@ if [ -x "$b" ] && [ "$("$b" -c 'echo $((BASH_VERSINFO[0]*10+BASH_VERSINFO[1]))')
          | env -i HOME="$TMP/h" TERM=xterm TERM_PROGRAM=autre PATH=/usr/bin:/bin DOTLIB_DIR="$CLEAN" DOTLIB_PROBE_TIME=10 script -q /dev/null "$b" --norc --noprofile -i 2>&1 | tr -d '\r' | grep -a -o -E 'T=[a-z]+' | tail -1)
   [ "$res" = T=dark ] && ok "autre terminal (TERM différent) : la mémoire d'un autre terminal n'est pas reprise" || ko "clé de mémoire" "$res"
   rm -f "$CLEAN/local/cache/fond"
+fi
+
+# --- share/terminal.tsv : la forme, et surtout la variante ------------------------------------------
+# L'erreur qui arriverait vraiment n'est pas une faute de frappe, c'est une variante POSÉE À L'ENVERS :
+# le jeu clair dans le thème sombre. Elle ne se voit pas en lisant le fichier, elle se voit en calculant
+# la luminance du fond. D'où la dernière vérification.
+T="$ROOT/share/terminal.tsv"
+CLES_T="bg fg curseur curseur_texte selection selection_texte"
+i=0; while [ $i -lt 16 ]; do CLES_T="$CLES_T ansi$i"; i=$((i + 1)); done
+out=$(awk -F'\t' -v cles="$CLES_T" '
+  /^#/ || /^[[:space:]]*$/ { next }
+  NF != 4 { print "colonnes: " $0; next }
+  $4 !~ /^[0-9a-f]{6}$/ { print "pas du RRGGBB: " $0 }
+  { vu[$1 "\t" $2 "\t" $3] = 1; pal[$1] = 1; n++ }
+  END {
+    split(cles, c, " ")
+    for (p in pal) for (t = 1; t <= 2; t++) {
+      th = (t == 1 ? "dark" : "light")
+      for (k in c) if (!((p "\t" th "\t" c[k]) in vu)) print "manque " p " " th " " c[k]
+    }
+    if (n != 22 * 22) print "lignes: " n " au lieu de 484"
+  }' "$T")
+[ -z "$out" ] && ok "share/terminal.tsv : 11 palettes × 2 thèmes × 22 clés, tout en RRGGBB" || ko "terminal.tsv" "$out"
+out=$(b_ /bin/bash xterm-256color 'echo $DOTLIB_PALETTES' | tr ' ' '\n' | sort | grep -v '^$' |
+      comm -3 - "$(awk -F'\t' '!/^#/ && NF==4 {print $1}' "$T" | sort -u > "$TMP/pt"; echo "$TMP/pt")")
+[ -z "$out" ] && ok "share/terminal.tsv : exactement les palettes de \$DOTLIB_PALETTES" || ko "palettes de terminal.tsv" "$out"
+out=$(awk -F'\t' '!/^#/ && NF==4 && $3 == "bg" {
+        r = strtonum("0x" substr($4,1,2)); v = strtonum("0x" substr($4,3,2)); b = strtonum("0x" substr($4,5,2))
+        luma = (299*r + 587*v + 114*b) / 1000
+        vu = (luma > 128 ? "light" : "dark")
+        if (vu != $2) print $1 " " $2 " : fond " $4 " (luma " int(luma) ") → " vu
+      }' "$T")
+[ -z "$out" ] && ok "share/terminal.tsv : chaque fond est du bon côté (pas de variante inversée)" || ko "variante inversée" "$out"
+
+# --- dotlib_theme_refresh (révision 3) -------------------------------------------------------------
+b=/opt/homebrew/bin/bash; [ -x "$b" ] || b=/usr/bin/bash
+if [ -x "$b" ] && [ "$("$b" -c 'echo $((BASH_VERSINFO[0]*10+BASH_VERSINFO[1]))')" -ge 42 ]; then
+  # TMP_TEMOIN est passé EXPRÈS à env -i : sans lui le « defaults » factice n'a nulle part où écrire,
+  # et le test « un seul appel » passerait pour la mauvaise raison — il a commencé par le faire.
+  r_() { env -i HOME="$TMP/h" PATH="$TMP/faux:/usr/bin:/bin" TERM=xterm-256color DOTLIB_DIR="$CLEAN" \
+           TMP_TEMOIN="${TMP_TEMOIN:-$TMP/temoin}" \
+           DOTLIB_COLORS=256 DOTLIB_PROBE=0 "$b" -c ". \"\$DOTLIB_DIR/lib/dotlib.sh\"; $1" 2>&1; }
+  # « defaults » factice : il laisse une trace. Un appel en trop se voit, au lieu de se deviner.
+  mkdir -p "$TMP/faux"
+  printf '#!/bin/sh\necho appel >> "$TMP_TEMOIN"\necho Dark\n' > "$TMP/faux/defaults"
+  chmod +x "$TMP/faux/defaults"
+
+  out=$(r_ 'DOTLIB_THEME=dark; dotlib_palette_load; dotlib_theme_refresh; echo "$? $DOTLIB_THEME_EFF"')
+  [ "$out" = "1 dark" ] && ok "dotlib_theme_refresh : thème forcé → 1, rien ne bouge" || ko "refresh forcé" "$out"
+
+  out=$(r_ 'DOTLIB_THEME=auto COLORFGBG="0;15"; dotlib_palette_load; a=$C_R_TEXT
+            COLORFGBG="15;0"; dotlib_theme_refresh; r=$?
+            [ "$C_R_TEXT" = "$a" ] && c=figées || c=suivent
+            echo "$r $DOTLIB_THEME_EFF $DOTLIB_THEME_DETECTED $c"')
+  [ "$out" = "0 dark dark suivent" ] && ok "dotlib_theme_refresh : le fond change → 0, thème reposé, C_* rechargées" \
+    || ko "refresh bascule" "$out"
+
+  out=$(r_ 'DOTLIB_THEME=auto COLORFGBG="0;15"; dotlib_palette_load
+            COLORFGBG="15;0"; dotlib_theme_refresh >/dev/null
+            COLORFGBG="0;15"; dotlib_theme_refresh; echo -n "$? $DOTLIB_THEME_EFF "
+            DOTLIB_THEME_WATCH=0 dotlib_theme_refresh; echo "$? $DOTLIB_THEME_EFF"')
+  [ "$out" = "1 dark 0 light" ] && ok "dotlib_theme_refresh : étranglé par défaut, remesure avec DOTLIB_THEME_WATCH=0" \
+    || ko "refresh étranglement" "$out"
+
+  out=$(r_ 'DOTLIB_THEME=auto COLORFGBG="15;0"; dotlib_palette_load
+            unset _DOTLIB_THEME_VU; dotlib_theme_refresh; echo "$? $DOTLIB_THEME_EFF"')
+  [ "$out" = "1 dark" ] && ok "dotlib_theme_refresh : fond inchangé → 1 (l'appelant ne redessine pas pour rien)" \
+    || ko "refresh inchangé" "$out"
+
+  out=$(TMP_TEMOIN="$TMP/temoin-ssh" r_ '            DOTLIB_THEME=auto; unset COLORFGBG; DOTLIB_OS=darwin SSH_CONNECTION=x
+            dotlib_palette_load; unset _DOTLIB_THEME_VU; dotlib_theme_refresh; echo $?')
+  [ "$out" = 1 ] && [ ! -e "$TMP/temoin-ssh" ] && ok "dotlib_theme_refresh : en ssh, rien à mesurer et aucun processus lancé" \
+    || ko "refresh ssh" "$out $(cat "$TMP/temoin-ssh" 2>/dev/null)"
+
+  n=$(TMP_TEMOIN="$TMP/temoin-forces" r_ 'DOTLIB_THEME=dark; dotlib_palette_load
+      i=0; while [ $i -lt 300 ]; do dotlib_theme_refresh; i=$((i + 1)); done; echo fini' >/dev/null
+      wc -l < "$TMP/temoin-forces" 2>/dev/null || echo 0)
+  [ "$(echo "$n" | tr -d ' ')" = 0 ] && ok "dotlib_theme_refresh : 300 appels en thème forcé, zéro processus lancé" \
+    || ko "refresh : processus lancés en thème forcé" "$n"
+
+  # Le témoin est remis à zéro APRÈS dotlib_palette_load : la mesure du démarrage du shell est
+  # légitime, c'est le débit À L'INVITE qu'on compte ici.
+  n=$(TMP_TEMOIN="$TMP/temoin-etrangle" r_ 'DOTLIB_THEME=auto; unset COLORFGBG
+      DOTLIB_OS=darwin; unset SSH_CONNECTION; dotlib_palette_load; : > "$TMP_TEMOIN"
+      i=0; while [ $i -lt 300 ]; do dotlib_theme_refresh; i=$((i + 1)); done' >/dev/null
+      wc -l < "$TMP/temoin-etrangle" 2>/dev/null || echo 0)
+  [ "$(echo "$n" | tr -d ' ')" = 1 ] && ok "dotlib_theme_refresh : 300 appels à l'invite, UN seul « defaults » (étranglement)" \
+    || ko "refresh : $n appels à « defaults » au lieu d'un seul"
+fi
+
+# --- bin/iterm2-couleurs (révision 3) ---------------------------------------------------------------
+if command -v python3 >/dev/null 2>&1; then
+  I="$ROOT/bin/iterm2-couleurs"; P="$TMP/profil.json"
+  ecrire_profil() { printf '%s\n' '{"Profiles":[{"Name":"Essai","Guid":"G","Has Hotkey":true,"Window Type":1}]}' > "$P"; }
+  hexa() {   # hexa FICHIER CLÉ → RRGGBB de cette clé du premier profil
+    python3 -c 'import json,sys
+c = json.load(open(sys.argv[1]))["Profiles"][0][sys.argv[2]]
+print("".join("%02x" % round(c[x + " Component"] * 255) for x in ("Red", "Green", "Blue")))' "$1" "$2" 2>&1
+  }
+  ecrire_profil
+  "$I" --palette gruvbox --theme auto --verifier "$P" >/dev/null 2>&1
+  [ $? = 3 ] && ok "iterm2-couleurs : --verifier sur un profil sans couleurs → 3 (il y aurait à écrire)" || ko "verifier 3"
+  "$I" --palette gruvbox --theme auto "$P" >/dev/null 2>&1 && ok "iterm2-couleurs : pose → 0" || ko "pose"
+  av=$(cat "$P")
+  "$I" --palette gruvbox --theme auto "$P" >/dev/null 2>&1
+  [ "$av" = "$(cat "$P")" ] && ok "iterm2-couleurs : deuxième passage, fichier INCHANGÉ (iTerm2 ne recharge pas pour rien)" \
+    || ko "iterm2-couleurs : le fichier a été réécrit à l'identique"
+  "$I" --palette gruvbox --theme auto --verifier "$P" >/dev/null 2>&1
+  [ $? = 0 ] && ok "iterm2-couleurs : --verifier sur un profil conforme → 0" || ko "verifier 0"
+  out=$(python3 -c 'import json,sys
+p = json.load(open(sys.argv[1]))["Profiles"][0]
+print(" ".join(k for k in p if "Color" not in k), p.get("Use Separate Colors for Light and Dark Mode"))' "$P")
+  [ "$out" = "Name Guid Has Hotkey Window Type True" ] \
+    && ok "iterm2-couleurs : les clés qui ne sont pas des couleurs sont intactes et dans l'ordre" || ko "clés voisines" "$out"
+  attendu_d=$(awk -F'\t' '$1=="gruvbox" && $2=="dark" && $3=="bg" {print $4}' "$ROOT/share/terminal.tsv")
+  attendu_c=$(awk -F'\t' '$1=="gruvbox" && $2=="light" && $3=="bg" {print $4}' "$ROOT/share/terminal.tsv")
+  [ "$(hexa "$P" 'Background Color (Dark)')" = "$attendu_d" ] &&
+  [ "$(hexa "$P" 'Background Color (Light)')" = "$attendu_c" ] &&
+  [ "$(hexa "$P" 'Background Color')" = "$attendu_d" ] \
+    && ok "iterm2-couleurs : auto → clair dans (Light), sombre dans (Dark) et sans suffixe" || ko "jeux clair/sombre"
+  ecrire_profil; "$I" --palette gruvbox --theme light "$P" >/dev/null 2>&1
+  [ "$(hexa "$P" 'Background Color (Dark)')" = "$attendu_c" ] \
+    && ok "iterm2-couleurs : thème forcé → la même variante dans les deux jeux" || ko "thème forcé"
+  "$I" --palette inconnue "$P" >/dev/null 2>&1; [ $? = 2 ] && ok "iterm2-couleurs : palette inconnue → 2" || ko "palette inconnue"
+  "$I" "$TMP/pas-la.json" >/dev/null 2>&1; [ $? = 1 ] && ok "iterm2-couleurs : fichier absent → 1" || ko "fichier absent"
+  printf '{ pas du json' > "$TMP/casse.json"
+  "$I" "$TMP/casse.json" >/dev/null 2>&1; [ $? = 1 ] && ok "iterm2-couleurs : JSON invalide → 1" || ko "json invalide"
+  printf '%s\n' '{"Profiles":[{"Name":"A"},{"Name":"B"}]}' > "$TMP/deux.json"
+  "$I" "$TMP/deux.json" >/dev/null 2>&1; [ $? = 2 ] && ok "iterm2-couleurs : deux profils sans --profil → 2" || ko "deux profils"
+  "$I" --profil B "$TMP/deux.json" >/dev/null 2>&1; [ $? = 0 ] && ok "iterm2-couleurs : --profil désigne le bon" || ko "--profil"
+  "$I" --profil Fantome "$TMP/deux.json" >/dev/null 2>&1; [ $? = 1 ] && ok "iterm2-couleurs : profil nommé introuvable → 1" || ko "profil introuvable"
 fi
 
 # --- share/palettes.tsv à jour ----------------------------------------------------------------------

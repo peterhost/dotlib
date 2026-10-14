@@ -17,9 +17,10 @@
 # avant d'employer une nouveauté, et construit sans elle sinon.
 #   1 : API 1 d'origine
 #   2 : dotlib_utf8, dotlib_pill -p et -c, arrondis par défaut, share/palettes-sources.tsv
+#   3 : dotlib_theme_refresh, share/terminal.tsv, bin/iterm2-couleurs
 
 DOTLIB_API=1
-DOTLIB_REVISION=2
+DOTLIB_REVISION=3
 : "${DOTLIB_DIR:=$HOME/.dotlib}"
 . "$DOTLIB_DIR/lib/platform.sh"
 . "$DOTLIB_DIR/lib/hints.sh"
