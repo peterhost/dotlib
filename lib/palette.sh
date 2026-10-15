@@ -17,7 +17,7 @@
 # Définit (dotlib_palette_load) :
 #   C_RESET C_BOLD C_DIM C_UL C_REV, C_BLACK… C_WHITE C_GREY (couleurs de base : suivent le terminal)
 #   C_OK C_WARN C_ERR C_INFO (sens)
-#   C_R_NUM C_R_DATE C_R_TEXT C_R_MATCH C_R_KEY C_R_PATH C_R_BAD C_R_NOTE (rôles, selon la palette)
+#   C_R_NUM C_R_DATE C_R_TEXT C_R_MATCH C_R_KEY C_R_PATH C_R_BAD C_R_NOTE C_R_OK (rôles, selon la palette)
 #   DOTLIB_THEME_EFF, DOTLIB_PALETTE_EFF    thème et palette retenus (EXPORTÉS : vim, outils)
 # Voir API.md pour ce qui est garanti.
 
@@ -221,28 +221,28 @@ _dotlib_sgr() {
 _dotlib_palette_data() {
   [ "${DOTLIB_PALETTE:-}" = actuel ] && DOTLIB_PALETTE=xterm      # ancien nom
   case ${DOTLIB_PALETTE:-catppuccin}:$DOTLIB_THEME_EFF in
-    xterm:dark) _p='d75fd7/170 005faf/25 a8a8a8/248 ffff00/226 - 00afd7/38 6c6c6c/242 ff5f5f/203 d7af5f/179' ;;
-    xterm:light) _p='af00af/127 005faf/25 585858/240 af5f00/130 - 0087af/31 8a8a8a/245 d70000/160 af5f00/130' ;;
-    catppuccin:dark) _p='cba6f7/183 89b4fa/111 a6adc8/146 1e1e2e/235 f9e2af/223 94e2d5/116 7f849c/103 f38ba8/211 fab387/216' ;;
-    catppuccin:light) _p='8839ef/99 1e66f5/27 5c5f77/60 eff1f5/255 df8e1d/172 179299/30 8c8fa1/246 d20f39/161 fe640b/202' ;;
-    gruvbox:dark) _p='d3869b/174 83a598/108 a89984/138 282828/235 fabd2f/214 8ec07c/108 928374/244 fb4934/203 fe8019/208' ;;
-    gruvbox:light) _p='8f3f71/95 076678/24 7c6f64/242 fbf1c7/230 b57614/136 427b58/65 928374/244 9d0006/124 af3a03/130' ;;
-    nord:dark) _p='b48ead/139 81a1c1/109 d8dee9/254 2e3440/237 88c0d0/110 88c0d0/110 616e88/60 bf616a/131 d08770/173' ;;
-    nord:light) _p='9a5f96/96 5e81ac/67 4c566a/240 2e3440/237 ebcb8b/186 4c7f8f/66 7b88a1/103 bf616a/131 c5714f/167' ;;
-    solarized:dark) _p='d33682/168 268bd2/32 839496/246 002b36/235 b58900/136 2aa198/36 586e75/242 dc322f/166 cb4b16/166' ;;
-    solarized:light) _p='d33682/168 268bd2/32 657b83/66 fdf6e3/230 b58900/136 2aa198/36 93a1a1/247 dc322f/166 cb4b16/166' ;;
-    tokyonight:dark) _p='bb9af7/141 7aa2f7/111 a9b1d6/146 c0caf5/153 3d59a1/61 7dcfff/117 565f89/60 f7768e/210 ff9e64/215' ;;
-    tokyonight:light) _p='9854f1/99 2e7de9/32 6172b0/61 e1e2e7/254 8c6c3e/95 007197/24 848cb5/103 f52a65/197 b15c00/130' ;;
-    everforest:dark) _p='d699b6/175 7fbbb3/109 9da9a0/248 2d353b/237 a7c080/144 83c092/108 859289/245 e67e80/174 e69875/174' ;;
-    everforest:light) _p='df69ba/169 3a94c5/68 829181/102 fdf6e3/230 8da101/106 35a77c/72 939f91/246 f85552/203 f57d26/208' ;;
-    edge:dark) _p='d38aea/176 6cb6eb/74 a0a8b7/248 2c2e34/236 a0c980/150 5dbbc1/73 7f8490/102 ec7279/204 deb974/180' ;;
-    edge:light) _p='b05ccc/134 5079be/67 6c7483/243 fafafa/231 608e32/65 3a8b84/66 8790a0/246 d05858/167 be7e05/136' ;;
-    lucius:dark) _p='d7afd7/182 87afd7/110 bcbcbc/250 303030/236 d7d7af/187 87d7d7/116 808080/244 d78787/174 d7af87/180' ;;
-    lucius:light) _p='870087/90 005faf/25 585858/240 eeeeee/255 af8700/136 008787/30 808080/244 af0000/124 af5f00/130' ;;
-    papercolor:dark) _p='af87d7/140 5fafd7/74 bcbcbc/250 1c1c1c/234 d7af5f/179 00afaf/37 808080/244 df0000/160 ff8700/208' ;;
-    papercolor:light) _p='8700af/91 0087af/31 585858/240 eeeeee/255 d75f00/166 005f87/24 878787/102 af0000/124 d75f00/166' ;;
-    pencil:dark) _p='6855de/62 20bbfc/39 b2b2b2/249 212121/234 f3e430/221 4fb8cc/74 6c6c6c/242 e32791/162 f3e430/221' ;;
-    pencil:light) _p='523c79/60 008ec4/32 626262/241 f1f1f1/255 a89c14/142 20a5ba/37 9e9e9e/247 c30771/125 a89c14/142' ;;
+    xterm:dark) _p='d75fd7/170 005faf/25 a8a8a8/248 ffff00/226 - 00afd7/38 6c6c6c/242 ff5f5f/203 d7af5f/179 5fd75f/77' ;;
+    xterm:light) _p='af00af/127 005faf/25 585858/240 af5f00/130 - 0087af/31 8a8a8a/245 d70000/160 af5f00/130 008700/28' ;;
+    catppuccin:dark) _p='cba6f7/183 89b4fa/111 a6adc8/146 1e1e2e/235 f9e2af/223 94e2d5/116 7f849c/103 f38ba8/211 fab387/216 a6e3a1/151' ;;
+    catppuccin:light) _p='8839ef/99 1e66f5/27 5c5f77/60 eff1f5/255 df8e1d/172 179299/30 8c8fa1/246 d20f39/161 fe640b/202 40a02b/70' ;;
+    gruvbox:dark) _p='d3869b/174 83a598/108 a89984/138 282828/235 fabd2f/214 8ec07c/108 928374/244 fb4934/203 fe8019/208 b8bb26/142' ;;
+    gruvbox:light) _p='8f3f71/95 076678/24 7c6f64/242 fbf1c7/230 b57614/136 427b58/65 928374/244 9d0006/124 af3a03/130 79740e/100' ;;
+    nord:dark) _p='b48ead/139 81a1c1/109 d8dee9/254 2e3440/237 88c0d0/110 88c0d0/110 616e88/60 bf616a/131 d08770/173 a3be8c/144' ;;
+    nord:light) _p='9a5f96/96 5e81ac/67 4c566a/240 2e3440/237 ebcb8b/186 4c7f8f/66 7b88a1/103 bf616a/131 c5714f/167 69894d/65' ;;
+    solarized:dark) _p='d33682/168 268bd2/32 839496/246 002b36/235 b58900/136 2aa198/36 586e75/242 dc322f/166 cb4b16/166 859900/100' ;;
+    solarized:light) _p='d33682/168 268bd2/32 657b83/66 fdf6e3/230 b58900/136 2aa198/36 93a1a1/247 dc322f/166 cb4b16/166 859900/100' ;;
+    tokyonight:dark) _p='bb9af7/141 7aa2f7/111 a9b1d6/146 c0caf5/153 3d59a1/61 7dcfff/117 565f89/60 f7768e/210 ff9e64/215 9ece6a/149' ;;
+    tokyonight:light) _p='9854f1/99 2e7de9/32 6172b0/61 e1e2e7/254 8c6c3e/95 007197/24 848cb5/103 f52a65/197 b15c00/130 587539/65' ;;
+    everforest:dark) _p='d699b6/175 7fbbb3/109 9da9a0/248 2d353b/237 a7c080/144 83c092/108 859289/245 e67e80/174 e69875/174 a7c080/144' ;;
+    everforest:light) _p='df69ba/169 3a94c5/68 829181/102 fdf6e3/230 8da101/106 35a77c/72 939f91/246 f85552/203 f57d26/208 8da101/106' ;;
+    edge:dark) _p='d38aea/176 6cb6eb/74 a0a8b7/248 2c2e34/236 a0c980/150 5dbbc1/73 7f8490/102 ec7279/204 deb974/180 a0c980/150' ;;
+    edge:light) _p='b05ccc/134 5079be/67 6c7483/243 fafafa/231 608e32/65 3a8b84/66 8790a0/246 d05858/167 be7e05/136 608e32/65' ;;
+    lucius:dark) _p='d7afd7/182 87afd7/110 bcbcbc/250 303030/236 d7d7af/187 87d7d7/116 808080/244 d78787/174 d7af87/180 afd787/150' ;;
+    lucius:light) _p='870087/90 005faf/25 585858/240 eeeeee/255 af8700/136 008787/30 808080/244 af0000/124 af5f00/130 008700/28' ;;
+    papercolor:dark) _p='af87d7/140 5fafd7/74 bcbcbc/250 1c1c1c/234 d7af5f/179 00afaf/37 808080/244 df0000/160 ff8700/208 5faf00/70' ;;
+    papercolor:light) _p='8700af/91 0087af/31 585858/240 eeeeee/255 d75f00/166 005f87/24 878787/102 af0000/124 d75f00/166 008700/28' ;;
+    pencil:dark) _p='6855de/62 20bbfc/39 b2b2b2/249 212121/234 f3e430/221 4fb8cc/74 6c6c6c/242 e32791/162 f3e430/221 5fd7af/79' ;;
+    pencil:light) _p='523c79/60 008ec4/32 626262/241 f1f1f1/255 a89c14/142 20a5ba/37 9e9e9e/247 c30771/125 a89c14/142 10a778/36' ;;
     *) return 1 ;;
   esac
 }
@@ -263,7 +263,7 @@ dotlib_palette_load() {
   if [ "${DOTLIB_COLORS:-0}" = 0 ] || [ -n "${NO_COLOR:-}" ]; then
     C_RESET= C_BOLD= C_DIM= C_UL= C_REV=
     C_BLACK= C_RED= C_GREEN= C_YELLOW= C_BLUE= C_MAGENTA= C_CYAN= C_WHITE= C_GREY=
-    C_R_NUM= C_R_DATE= C_R_TEXT= C_R_MATCH= C_R_KEY= C_R_PATH= C_R_BAD= C_R_NOTE=
+    C_R_NUM= C_R_DATE= C_R_TEXT= C_R_MATCH= C_R_KEY= C_R_PATH= C_R_BAD= C_R_NOTE= C_R_OK=
     C_OK= C_WARN= C_ERR= C_INFO=
     _dotlib_theme_resolve             # sans couleur, le thème retenu sert quand même (vim, outils)
     export DOTLIB_THEME_EFF DOTLIB_PALETTE_EFF=${DOTLIB_PALETTE:-catppuccin}
@@ -280,7 +280,7 @@ dotlib_palette_load() {
     # Couleurs de base : c'est le thème du terminal qui les rend lisibles
     C_GREY=$'\e[1;30m'
     C_R_NUM=$'\e[35m' C_R_DATE=$'\e[34m' C_R_TEXT=$C_GREY C_R_MATCH=$'\e[1;33m' C_R_KEY=$'\e[1;36m'
-    C_R_PATH=$C_GREY C_R_BAD=$'\e[31m' C_R_NOTE=$'\e[33m'
+    C_R_PATH=$C_GREY C_R_BAD=$'\e[31m' C_R_NOTE=$'\e[33m' C_R_OK=$'\e[32m'
     [ "$DOTLIB_THEME_EFF" = light ] && C_R_MATCH=$'\e[1;7;33m'
     if [ "${DOTLIB_TERM:-}" = console ]; then
       # Console linux : pas de « dim », bleu foncé illisible sur fond noir
@@ -299,6 +299,9 @@ dotlib_palette_load() {
   _dotlib_sgr "$7"; C_R_PATH=$'\e['"${_S}m"
   _dotlib_sgr "$8"; C_R_BAD=$'\e['"${_S}m"
   _dotlib_sgr "$9"; C_R_NOTE=$'\e['"${_S}m"
+  # Dixième champ : bash 3.2 (et tout shell POSIX) exige les accolades au-delà de $9 — « $10 »
+  # se lirait « $1 » suivi d'un « 0 ». Vérifié sous bash 3.2.
+  _dotlib_sgr "${10}"; C_R_OK=$'\e['"${_S}m"
   if [ "$5" != - ] && [ "${DOTLIB_MATCH:-fond}" = fond ]; then
     _dotlib_sgr "$4"; mf=$_S; _dotlib_sgr "$5" fond
     C_R_MATCH=$'\e[1;'"$mf;${_S}m"

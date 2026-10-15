@@ -15,9 +15,10 @@
 #   Couleurs : T_RESET T_BOLD T_DIM T_UL T_REV T_RED T_GREEN T_YELLOW T_BLUE T_MAGENTA T_CYAN T_GREY,
 #   et celles de lib/palette.sh (C_*, C_R_*) : vides si la sortie n'est pas un terminal
 #   Le rendu des tui_* suit le THÈME par les rôles de palette.sh, et non les couleurs de base du
-#   terminal : titre C_R_KEY · avertissement C_R_NOTE · erreur C_R_BAD · curseur de menu C_R_MATCH
-#   (texte sur fond coloré, donc lisible sur fond clair comme sur fond sombre). Seul tui_ok garde
-#   C_GREEN, faute de rôle « bon » dans la palette. Les T_* restent fournis pour les appelants.
+#   terminal : titre C_R_KEY · avertissement C_R_NOTE · erreur C_R_BAD · succès C_R_OK · curseur de
+#   menu C_R_MATCH (texte sur fond coloré, donc lisible sur fond clair comme sur fond sombre).
+#   tui_ok prenait C_GREEN faute de rôle « succès » : la palette en a un depuis la révision 4.
+#   Les T_* restent fournis pour les appelants.
 #   TUI_INTERACTIVE=1 si stdin et stdout sont des terminaux ; TUI_OK TUI_KO TUI_WARN TUI_PTR (glyphes)
 #
 # Aucun tput : séquences ANSI directes (tput manque sur certains systèmes).
@@ -46,7 +47,7 @@ dotlib_utf8 || { TUI_OK='+' TUI_KO='x' TUI_PTR='>'; }
 
 tui_title() { printf '\n%s== %s ==%s\n' "$C_R_KEY" "$*" "$T_RESET"; }
 tui_info()  { printf '  %s\n' "$*"; }
-tui_ok()    { printf '  %s%s%s %s\n' "$T_GREEN" "$TUI_OK" "$T_RESET" "$*"; }
+tui_ok()    { printf '  %s%s%s %s\n' "$C_R_OK" "$TUI_OK" "$T_RESET" "$*"; }
 tui_warn()  { printf '  %s%s%s %s\n' "$C_R_NOTE" "$TUI_WARN" "$T_RESET" "$*" >&2; }
 tui_err()   { printf '  %s%s%s %s\n' "$C_R_BAD" "$TUI_KO" "$T_RESET" "$*" >&2; }
 tui_die()   { tui_err "$1"; exit "${2:-1}"; }

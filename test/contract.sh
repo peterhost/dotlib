@@ -15,7 +15,7 @@ E=$(printf '\033')
 # --- API, sous chaque bash --------------------------------------------------------------------------
 FUNCS='dotlib_palette_load dotlib_pill dotlib_theme_set dotlib_have dotlib_need dotlib_install_hint dotlib_pkg_of'
 TUIF='tui_title tui_info tui_ok tui_warn tui_err tui_die tui_confirm tui_ask tui_menu tui_need tui_table'
-ROLES='C_R_NUM C_R_DATE C_R_TEXT C_R_MATCH C_R_KEY C_R_PATH C_R_BAD C_R_NOTE'
+ROLES='C_R_NUM C_R_DATE C_R_TEXT C_R_MATCH C_R_KEY C_R_PATH C_R_BAD C_R_NOTE C_R_OK'
 BASE='C_RESET C_BOLD C_DIM C_UL C_REV C_RED C_GREEN C_YELLOW C_BLUE C_MAGENTA C_CYAN C_GREY C_OK C_WARN C_ERR C_INFO'
 TVARS='T_RESET T_BOLD T_DIM T_UL T_REV T_RED T_GREEN T_YELLOW T_BLUE T_MAGENTA T_CYAN T_GREY'
 # Copie de dotlib SANS local/ : les réglages de l'utilisateur de cette machine ne doivent pas influer
@@ -112,7 +112,7 @@ for b in /bin/bash /opt/homebrew/bin/bash /usr/bin/bash /usr/local/bin/bash /opt
   done
   [ "$bon" = 1 ] && ok "bash $v · pastille : rien que l'icône et le texte de visible (3 profondeurs × 4 formes)"
   out=$(b_ "$b" xterm-256color 'echo "$DOTLIB_API/$DOTLIB_REVISION"')
-  [ "$out" = "1/3" ] && ok "bash $v · DOTLIB_API et DOTLIB_REVISION annoncés" || ko "bash $v · version" "$out"
+  [ "$out" = "1/4" ] && ok "bash $v · DOTLIB_API et DOTLIB_REVISION annoncés" || ko "bash $v · version" "$out"
   out=$(b_ "$b" xterm-256color 'dotlib_palette_load; dotlib_pill -p -c BAD "x" "T"
       case $DOTLIB_PILL in *";5m"*) echo clignote ;; *) echo non ;; esac')
   [ "$out" = clignote ] && ok "bash $v · pastille -c : cœur clignotant (SGR 5)" || ko "bash $v · pastille -c" "$out"

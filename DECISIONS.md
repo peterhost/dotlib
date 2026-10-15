@@ -104,3 +104,14 @@ pouvoir reprendre dotlib en lisant API.md, CLAUDE.md, ce journal et les tests.
   trouvé. Le signe employé ne dépend pas d'une mesure : un terminal au repos n'a RIEN à lire, une entrée
   fermée est « prête à lire » et ne rend rien. On ne lit jamais l'octet — savoir qu'il y en a un suffit,
   le prendre le volerait au clavier.
+- **Un rôle « succès » dans la palette** (15/10/2026, révision 4). `palettes.tsv` nommait le mauvais
+  (`bad`) et le douteux (`note`), jamais le bon : un ✓, un état « actif », une avance git, une branche à
+  jour dans l'invite ou un exécutable de `ls` n'avaient donc que `C_GREEN`, le vert de BASE du terminal
+  — une couleur qui ne suit ni le thème ni la palette, et qui ne tient pas sa lisibilité sur fond clair.
+  D'où `C_R_OK`, sourcé du vert officiel de chaque palette amont, et `tui_ok` qui le prend. **Trois
+  arbitrages pris avec lui** : (1) le vert d'`everforest` et d'`edge` est EXACTEMENT leur `match_bg`,
+  parce que ces deux thèmes amont peignent leur surlignage avec leur vert — le doublon est accepté,
+  inventer une seconde teinte trahirait la palette ; (2) en 8 couleurs le rôle retombe sur `\e[32m` sans
+  ajustement pour le fond clair, comme `bad` et `note`, le thème du terminal répondant de ces huit-là ;
+  (3) la pastille n'y touche pas — `dotlib_pill` accepte toujours `BAD NOTE KEY NUM DATE` et pas `OK`,
+  un fond vert n'ayant pas été demandé.

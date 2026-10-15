@@ -17,6 +17,8 @@ préavis : ne l'utilisez pas, même si cela marche.
 
       1 : API 1 d'origine
       2 : `dotlib_utf8`, `dotlib_pill -p` et `-c`, arrondis par défaut, `share/palettes-sources.tsv`
+      3 : `dotlib_theme_refresh`, `share/terminal.tsv`, `bin/iterm2-couleurs`
+      4 : `C_R_OK`, le rôle « succès » (rôle `ok` de `share/palettes.tsv`) ; `tui_ok` le suit
 - Une valeur de réglage inconnue doit être traitée par l'appelant comme sa valeur par défaut :
   des valeurs peuvent s'ajouter.
 - `test/contract.sh` vérifie chaque point ci-dessous ; il doit passer avant toute publication.
@@ -83,7 +85,7 @@ Variables (vides sans couleur) :
 
 - base, qui suivent le thème du terminal : `C_RESET C_BOLD C_DIM C_UL C_REV C_BLACK C_RED C_GREEN C_YELLOW C_BLUE C_MAGENTA C_CYAN C_WHITE C_GREY`
 - sens : `C_OK C_WARN C_ERR C_INFO`
-- rôles, selon la palette : `C_R_NUM` (numéros) `C_R_DATE` `C_R_TEXT` `C_R_MATCH` (correspondance) `C_R_KEY` (noms) `C_R_PATH` `C_R_BAD` `C_R_NOTE`
+- rôles, selon la palette : `C_R_NUM` (numéros) `C_R_DATE` `C_R_TEXT` `C_R_MATCH` (correspondance) `C_R_KEY` (noms) `C_R_PATH` `C_R_BAD` `C_R_NOTE` `C_R_OK` (succès, révision 4)
 - `DOTLIB_PALETTES` : la liste des palettes
 - **exportées**, pour les programmes lancés depuis le shell (vim…) : `DOTLIB_THEME_EFF` (`dark` `light`, « auto » résolu) et `DOTLIB_PALETTE_EFF`
 
@@ -99,7 +101,8 @@ Variables : `TUI_INTERACTIVE`, `TUI_YES` (entrée), `TUI_OK TUI_KO TUI_WARN TUI_
 ## `share/palettes.tsv`
 
 `palette <TAB> thème <TAB> rôle <TAB> RRGGBB <TAB> index256`. Rôles : `num date text match_fg match_bg key
-path bad note surface text_on_surface crust`. Des lignes et des rôles peuvent s'ajouter.
+path bad note ok surface text_on_surface crust` (`ok` depuis la révision 4). Des lignes et des rôles
+peuvent s'ajouter.
 
 ## `share/terminal.tsv` (révision 3)
 
@@ -108,10 +111,10 @@ Clés : `bg fg curseur curseur_texte selection selection_texte ansi0` … `ansi1
 palettes en sombre et en clair. Des lignes et des clés peuvent s'ajouter.
 
 Il existe parce qu'un terminal ne demande pas ce que demande un texte. `palettes.tsv` ne porte que des
-couleurs de **rôle** ; les rôles donnent du rouge, du jaune, du bleu, du magenta, du cyan, et **pas de
-vert**, et les huit variantes vives n'existent nulle part. Ces couleurs-ci ne se déduisent donc pas de
-celles-là : elles sont reprises de l'amont de chaque palette, et la provenance — amont ou **dérivée** —
-est écrite palette par palette en tête du fichier.
+couleurs de **rôle** ; les rôles donnent du rouge, du jaune, du bleu, du magenta, du cyan et, depuis
+la révision 4, **un seul** vert (celui du succès), et les huit variantes vives n'existent nulle part.
+Ces couleurs-ci ne se déduisent donc pas de celles-là : elles sont reprises de l'amont de chaque
+palette, et la provenance — amont ou **dérivée** — est écrite palette par palette en tête du fichier.
 
 ## Thème : rafraîchissement en cours de session (révision 3)
 
