@@ -283,8 +283,13 @@ dotlib_palette_load() {
     C_R_PATH=$C_GREY C_R_BAD=$'\e[31m' C_R_NOTE=$'\e[33m' C_R_OK=$'\e[32m'
     [ "$DOTLIB_THEME_EFF" = light ] && C_R_MATCH=$'\e[1;7;33m'
     if [ "${DOTLIB_TERM:-}" = console ]; then
-      # Console linux : pas de « dim », bleu foncé illisible sur fond noir
-      C_DIM= C_BLUE=$'\e[1;34m' C_R_DATE=$'\e[1;34m' C_R_TEXT=
+      # Console linux : pas de « dim », bleu foncé illisible sur fond noir.
+      # C_R_TEXT ET C_R_PATH : tous deux valent C_GREY, c'est-à-dire 1;30 — du gris foncé sur le
+      # noir de la console, le pire contraste du jeu. On les vide tous les deux : un chemin en
+      # couleur par défaut reste lisible, et deux rôles de même valeur ne peuvent pas être traités
+      # différemment sans raison. (Asymétrie relevée le 15/10/2026 par les sessions vim et bash,
+      # mesurée ici sous pseudo-terminal : seul C_R_TEXT était vidé.)
+      C_DIM= C_BLUE=$'\e[1;34m' C_R_DATE=$'\e[1;34m' C_R_TEXT= C_R_PATH=
     fi
     return 0
   fi
