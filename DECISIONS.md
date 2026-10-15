@@ -115,3 +115,31 @@ pouvoir reprendre dotlib en lisant API.md, CLAUDE.md, ce journal et les tests.
   ajustement pour le fond clair, comme `bad` et `note`, le thème du terminal répondant de ces huit-là ;
   (3) la pastille n'y touche pas — `dotlib_pill` accepte toujours `BAD NOTE KEY NUM DATE` et pas `OK`,
   un fond vert n'ayant pas été demandé.
+
+## Les rôles de couleur ne s'exportent pas dans l'environnement
+
+**Décidé le 15/10/2026**, à l'occasion de l'ajout de `C_R_OK`, sur un argument de la session
+`~/.vim` que ce dépôt adopte.
+
+Un consommateur avait demandé que `C_R_OK` soit exporté comme `DOTLIB_THEME_EFF` l'est, pour
+l'obtenir sans lire de fichier au lancement. **Réponse : aucun rôle ne s'exporte, et la raison
+n'est pas le coût.**
+
+Une séquence d'échappement est une **sortie déjà rendue**, pas un réglage. Elle encode la décision
+prise par le processus qui l'a calculée à partir de trois choses locales : la sortie est-elle un
+terminal, `NO_COLOR` est-il posé, que vaut `TERM`. Héritée par un enfant, elle porte la décision du
+parent : fausse dans un tuyau, fausse sous `NO_COLOR`, fausse sur une autre console. Une variable
+qu'il faut ignorer la moitié du temps ne vaut pas un contrat.
+
+`DOTLIB_THEME_EFF` et `DOTLIB_PALETTE_EFF` s'exportent parce que ce sont des **réglages**
+(`dark`/`light`, nom de palette) : ils ne se périment pas en voyageant.
+
+**Conséquence pour un consommateur qui ne peut pas sourcer `lib/tui.sh`** (busybox ash d'un NAS,
+par exemple) : il tient sa propre table des valeurs, lues une fois à la main dans
+`share/palettes.tsv` par nom de rôle et nom de colonne, et fait le rendu lui-même à partir de
+`DOTLIB_THEME_EFF` et `DOTLIB_PALETTE_EFF`. Ce dépôt reste la source des valeurs.
+
+**Engagement qui va avec** : si la valeur d'un rôle **change**, les consommateurs qui en tiennent
+une copie sont prévenus. Un rôle **ajouté** ne demande aucun message : une palette ou un rôle
+inconnu d'une table tierce doit y tomber sur son repli, jamais sur une approximation.
+
