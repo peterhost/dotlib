@@ -14,6 +14,10 @@
 #   tui_table                               aligne des colonnes séparées par des tabulations (stdin)
 #   Couleurs : T_RESET T_BOLD T_DIM T_UL T_REV T_RED T_GREEN T_YELLOW T_BLUE T_MAGENTA T_CYAN T_GREY,
 #   et celles de lib/palette.sh (C_*, C_R_*) : vides si la sortie n'est pas un terminal
+#   Le rendu des tui_* suit le THÈME par les rôles de palette.sh, et non les couleurs de base du
+#   terminal : titre C_R_KEY · avertissement C_R_NOTE · erreur C_R_BAD · curseur de menu C_R_MATCH
+#   (texte sur fond coloré, donc lisible sur fond clair comme sur fond sombre). Seul tui_ok garde
+#   C_GREEN, faute de rôle « bon » dans la palette. Les T_* restent fournis pour les appelants.
 #   TUI_INTERACTIVE=1 si stdin et stdout sont des terminaux ; TUI_OK TUI_KO TUI_WARN TUI_PTR (glyphes)
 #
 # Aucun tput : séquences ANSI directes (tput manque sur certains systèmes).
@@ -40,11 +44,11 @@ TUI_OK='✓' TUI_KO='✗' TUI_WARN='!' TUI_PTR='›'
 # copies d'une même règle finissent toujours par diverger — la pastille arrondie a besoin de la même.
 dotlib_utf8 || { TUI_OK='+' TUI_KO='x' TUI_PTR='>'; }
 
-tui_title() { printf '\n%s%s== %s ==%s\n' "$T_BOLD" "$T_CYAN" "$*" "$T_RESET"; }
+tui_title() { printf '\n%s== %s ==%s\n' "$C_R_KEY" "$*" "$T_RESET"; }
 tui_info()  { printf '  %s\n' "$*"; }
 tui_ok()    { printf '  %s%s%s %s\n' "$T_GREEN" "$TUI_OK" "$T_RESET" "$*"; }
-tui_warn()  { printf '  %s%s%s %s\n' "$T_YELLOW" "$TUI_WARN" "$T_RESET" "$*" >&2; }
-tui_err()   { printf '  %s%s%s %s\n' "$T_RED" "$TUI_KO" "$T_RESET" "$*" >&2; }
+tui_warn()  { printf '  %s%s%s %s\n' "$C_R_NOTE" "$TUI_WARN" "$T_RESET" "$*" >&2; }
+tui_err()   { printf '  %s%s%s %s\n' "$C_R_BAD" "$TUI_KO" "$T_RESET" "$*" >&2; }
 tui_die()   { tui_err "$1"; exit "${2:-1}"; }
 
 # tui_confirm "Question ?" [o|n]
@@ -93,7 +97,7 @@ tui_menu() {
   printf '\e[?25l'                                   # curseur masqué pendant le menu
   while :; do
     for (( __i = 0; __i < __n; __i++ )); do
-      if [ $__i -eq $__sel ]; then printf '\r\e[K  %s%s %s%s\n' "$T_CYAN$T_BOLD" "$TUI_PTR" "${__opts[__i]}" "$T_RESET"
+      if [ $__i -eq $__sel ]; then printf '\r\e[K  %s%s %s%s\n' "$C_R_MATCH" "$TUI_PTR" "${__opts[__i]}" "$T_RESET"
       else printf '\r\e[K    %s\n' "${__opts[__i]}"; fi
     done
     IFS= read -rsn1 __key
